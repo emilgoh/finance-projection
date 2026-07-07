@@ -38,6 +38,12 @@ on `file://` URLs.)
   with a retirement marker and a crosshair tooltip (mouse or arrow keys).
 - **Light & dark mode** — follows your system by default; the sun/moon button
   in the top-right corner switches theme, and the choice is remembered.
+- **Life events** — one-off big expenses (wedding, home down payment, kids'
+  university) entered in today's money at a given age; each is inflated and
+  spent from savings in the year it lands.
+- **Import / export** — download all your data as a JSON file and load it back
+  later or on another device (footer links). Old export shapes are migrated on
+  import.
 - **Table view** — the same projection as year-by-year figures: net worth,
   today's-money value, CPF balance, amount saved or withdrawn, and investment
   growth.
@@ -56,6 +62,10 @@ Annual steps, deliberately simple:
   withdrawn instead (net of CPF LIFE payouts once they start). If liquid
   savings hit zero they stay there (no borrowing).
 - "Today's money" divides nominal values by cumulative inflation.
+- Life events are one-off outflows from liquid savings, inflated from today's
+  money to the year they occur. A house purchase is modelled as the cash you
+  part with (e.g. the down payment) — the property doesn't come back as an
+  asset (see TODO).
 - Financial independence is measured against assets *outside* CPF, since CPF is
   locked until the payout age.
 
@@ -100,6 +110,41 @@ CPF parameters (in `js/projection.js`) are based on:
 [CPF contribution rates from 1 Jan 2026](https://www.cpf.gov.sg/employer/employer-obligations/how-much-cpf-contributions-to-pay) ·
 [2026 retirement sums and payout estimates](https://www.cpf.gov.sg/service/article/what-is-the-current-enhanced-retirement-sum) ·
 [senior-worker rate changes](https://www.cpf.gov.sg/service/article/what-are-the-changes-to-the-cpf-contribution-rates-for-senior-workers-from-1-january-2026)
+
+## TODO — what the model doesn't cover yet
+
+Roughly in order of how much they'd change the numbers:
+
+- [ ] **Housing as an asset, not just an expense** — a home purchase should add
+  a property to net worth with a mortgage against it (repayments, interest,
+  appreciation), and support using CPF OA for housing. Today a purchase is
+  only the cash leaving your savings.
+- [ ] **Per-account returns / asset allocation** — cash, brokerage, and SRS all
+  compound at one blended rate; idle cash earning ~0% and equities earning
+  more should diverge.
+- [ ] **SRS modelling** — contributions should reduce chargeable income (tax
+  relief), and withdrawals from 63 are 50% taxable; today SRS is just another
+  account.
+- [ ] **Windfalls / income events** — one-off inflows (inheritance, bonus,
+  sale) as the positive twin of life events; recurring multi-year costs
+  (children's education) too.
+- [ ] **Scenario bands** — optimistic/pessimistic return spread around the
+  projection, or Monte Carlo for sequence-of-returns risk; a single fixed
+  return flatters retirement drawdown.
+- [ ] **Parameter indexation** — CPF ceilings, retirement sums, BHS, and tax
+  brackets are held at 2026 values; in reality they rise, which matters over
+  a 60-year projection.
+- [ ] **CPF fine detail** — extra 1% interest on the first S$60,000, MediSave
+  cap (BHS) with overflow to SA, age-based allocation shifts, withdrawal of
+  savings above the FRS at 55, and CPF LIFE plan choice
+  (Standard/Escalating/Basic).
+- [ ] **More tax reliefs** — spouse/child/parent reliefs, CPF top-up and SRS
+  reliefs, and the S$80,000 relief cap; only earned-income and CPF reliefs
+  count today.
+- [ ] **Couples / joint planning** — two incomes, two CPF accounts, shared
+  expenses and events.
+- [ ] **Event markers on the chart** — label life events on the timeline so a
+  dip is self-explanatory.
 
 ## Project layout
 

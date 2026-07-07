@@ -138,6 +138,17 @@
           lifelong payouts from age 65.
         </p>
       </div>
+
+      <div class="card events-card">
+        <h2>Life events <small class="h2-hint">(one-off big expenses, today's money)</small></h2>
+        <div id="events-list" class="accounts-list"></div>
+        <div class="accounts-footer">
+          <button type="button" id="add-event" class="btn">+ Add event</button>
+          <p class="accounts-total events-hint">Wedding, home down payment, kids'
+            university — spent from savings in the year you reach that age,
+            adjusted for inflation.</p>
+        </div>
+      </div>
     </section>
 
     <section class="results" aria-label="Projection results">
@@ -179,7 +190,10 @@
        earned-income reliefs; CPF LIFE payouts and investment gains are untaxed.
        This is a rough model, not financial advice.</p>
     <p>Your data never leaves this browser — it is saved in local storage only.
-       <button type="button" id="reset-data" class="btn-link">Reset all data</button></p>
+       <button type="button" id="export-data" class="btn-link">Export data</button> ·
+       <button type="button" id="import-data" class="btn-link">Import data</button> ·
+       <button type="button" id="reset-data" class="btn-link">Reset all data</button>
+       <input type="file" id="import-file" accept="application/json,.json" hidden></p>
   </footer>
 
   <script type="module" src="js/app.js"></script>

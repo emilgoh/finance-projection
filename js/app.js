@@ -28,6 +28,7 @@ const DEFAULT_STATE = {
     { name: "Brokerage", type: "investments", value: 20000 },
     { name: "SRS", type: "retirement", value: 10000 },
   ],
+  events: [],
 };
 
 const ACCOUNT_TYPES = ["cash", "investments", "retirement", "property", "other"];
@@ -57,6 +58,8 @@ function mergeSaved(saved) {
   const merged = { ...structuredClone(DEFAULT_STATE), ...saved };
   merged.cpf = { ...structuredClone(DEFAULT_STATE.cpf), ...(saved.cpf || {}) };
   delete merged.cpf.grossMonthlySalary;
+  if (!Array.isArray(merged.accounts)) merged.accounts = [];
+  if (!Array.isArray(merged.events)) merged.events = [];
   return merged;
 }
 
@@ -233,6 +236,69 @@ function accountsTotal() {
   return state.accounts.reduce((sum, a) => sum + (Number.isFinite(a.value) ? a.value : 0), 0);
 }
 
+/* ---------- life events ---------- */
+function renderEvents() {
+  const list = document.getElementById("events-list");
+  list.textContent = "";
+  state.events.forEach((event, i) => {
+    const row = document.createElement("div");
+    row.className = "event-row";
+
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = event.name;
+    name.placeholder = "Event (e.g. home down payment)";
+    name.setAttribute("aria-label", "Event name");
+    name.addEventListener("input", () => {
+      event.name = name.value;
+      saveState();
+    });
+
+    const age = document.createElement("input");
+    age.type = "number";
+    age.step = "1";
+    age.min = "16";
+    age.max = "120";
+    age.value = event.age;
+    age.setAttribute("aria-label", "At age");
+    age.title = "At age";
+    age.addEventListener("input", () => {
+      const v = parseFloat(age.value);
+      event.age = Number.isFinite(v) ? v : 0;
+      saveState();
+      recompute();
+    });
+
+    const amount = document.createElement("input");
+    amount.type = "number";
+    amount.step = "1000";
+    amount.min = "0";
+    amount.value = event.amount;
+    amount.setAttribute("aria-label", `Amount in today's ${state.currency}`);
+    amount.addEventListener("input", () => {
+      const v = parseFloat(amount.value);
+      event.amount = Number.isFinite(v) ? v : 0;
+      saveState();
+      recompute();
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "account-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove ${event.name || "event"}`);
+    remove.addEventListener("click", () => {
+      state.events.splice(i, 1);
+      saveState();
+      renderEvents();
+      recompute();
+    });
+
+    row.append(name, age, amount, remove);
+    list.append(row);
+  });
+}
+
 function netWorthToday() {
   return accountsTotal() + (state.cpf.enabled ? cpfTotalToday() : 0);
 }
@@ -257,6 +323,7 @@ function recompute() {
     incomeGrowthRate: state.incomeGrowthRate,
     includeTax: state.includeTax,
     cpf: state.cpf,
+    events: state.events,
   });
 
   updateIncomeHint();
@@ -467,6 +534,66 @@ document.getElementById("add-account").addEventListener("click", () => {
   rows[rows.length - 1]?.querySelector("input")?.focus();
 });
 
+document.getElementById("add-event").addEventListener("click", () => {
+  state.events.push({ name: "", age: state.currentAge + 5, amount: 0 });
+  saveState();
+  renderEvents();
+  recompute();
+  const rows = document.querySelectorAll("#events-list .event-row");
+  rows[rows.length - 1]?.querySelector("input")?.focus();
+});
+
+/* ---------- import / export ---------- */
+document.getElementById("export-data").addEventListener("click", () => {
+  const payload = {
+    app: "wealth-projection",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    state,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `wealth-projection-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("import-data").addEventListener("click", () => {
+  document.getElementById("import-file").click();
+});
+
+document.getElementById("import-file").addEventListener("change", async (ev) => {
+  const file = ev.target.files?.[0];
+  ev.target.value = ""; // allow re-importing the same file
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    // accept both an export payload and a bare state object
+    const saved = parsed && typeof parsed.state === "object" ? parsed.state : parsed;
+    if (!saved || typeof saved !== "object" ||
+        !("accounts" in saved || "cpf" in saved || "monthlyGrossIncome" in saved)) {
+      throw new Error("not a wealth-projection export");
+    }
+    if (!confirm("Replace your current data with the imported file?")) return;
+    if (saved.monthlyIncome != null && saved.monthlyGrossIncome == null) {
+      // legacy shape: take-home income + CPF gross salary
+      saved.monthlyGrossIncome = saved.cpf?.grossMonthlySalary ?? saved.monthlyIncome;
+      delete saved.monthlyIncome;
+    }
+    state = mergeSaved(saved);
+    saveState();
+    bindPlanInputsValuesOnly();
+    applyTheme();
+    renderAccounts();
+    renderEvents();
+    recompute();
+  } catch {
+    alert("Couldn't import that file — it doesn't look like a wealth-projection export.");
+  }
+});
+
 document.getElementById("reset-data").addEventListener("click", () => {
   if (!confirm("Reset all data to the defaults?")) return;
   localStorage.removeItem(STORAGE_KEY);
@@ -474,6 +601,7 @@ document.getElementById("reset-data").addEventListener("click", () => {
   bindPlanInputsValuesOnly();
   applyTheme();
   renderAccounts();
+  renderEvents();
   recompute();
 });
 
@@ -502,4 +630,5 @@ bindPlanInputs();
 bindCpfInputs();
 bindViewToggle();
 renderAccounts();
+renderEvents();
 recompute();
