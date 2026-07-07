@@ -1,23 +1,30 @@
 import { project } from "./projection.js";
 import { renderChart } from "./chart.js";
 
-const STORAGE_KEY = "wealth-projection-v1";
+const STORAGE_KEY = "wealth-projection-v2";
 
 const DEFAULT_STATE = {
-  currency: "$",
+  currency: "S$",
   currentAge: 30,
   retirementAge: 65,
-  endAge: 90,
-  monthlyIncome: 5000,
+  endAge: 95,
+  monthlyIncome: 4800,
   monthlyExpenses: 3500,
   monthlyRetirementSpend: 3500,
   returnRate: 6,
-  inflationRate: 2.5,
+  inflationRate: 2,
   incomeGrowthRate: 3,
+  cpf: {
+    enabled: true,
+    grossMonthlySalary: 6000,
+    oa: 30000,
+    sa: 12000,
+    ma: 18000,
+  },
   accounts: [
-    { name: "Checking", type: "cash", value: 5000 },
+    { name: "Bank account", type: "cash", value: 5000 },
     { name: "Brokerage", type: "investments", value: 20000 },
-    { name: "Retirement fund", type: "retirement", value: 15000 },
+    { name: "SRS", type: "retirement", value: 10000 },
   ],
 };
 
@@ -32,7 +39,9 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      return { ...structuredClone(DEFAULT_STATE), ...saved };
+      const merged = { ...structuredClone(DEFAULT_STATE), ...saved };
+      merged.cpf = { ...structuredClone(DEFAULT_STATE.cpf), ...(saved.cpf || {}) };
+      return merged;
     }
   } catch { /* corrupt storage — fall back to defaults */ }
   return structuredClone(DEFAULT_STATE);
@@ -80,13 +89,62 @@ function bindPlanInputs() {
   }
   const currency = document.getElementById("in-currency");
   currency.value = state.currency;
-  if (currency.value !== state.currency) currency.value = "$"; // unknown saved symbol
+  if (currency.value !== state.currency) currency.value = "S$"; // unknown saved symbol
   currency.addEventListener("change", () => {
     state.currency = currency.value;
     saveState();
     recompute();
     renderAccounts();
   });
+}
+
+/* ---------- CPF ---------- */
+const CPF_FIELDS = [
+  ["in-cpfSalary", "grossMonthlySalary"],
+  ["in-cpfOa", "oa"],
+  ["in-cpfSa", "sa"],
+  ["in-cpfMa", "ma"],
+];
+
+function bindCpfInputs() {
+  const enabled = document.getElementById("in-cpfEnabled");
+  enabled.checked = state.cpf.enabled;
+  enabled.addEventListener("change", () => {
+    state.cpf.enabled = enabled.checked;
+    saveState();
+    syncCpfUI();
+    updateAccountsTotal();
+    recompute();
+  });
+  for (const [id, key] of CPF_FIELDS) {
+    const input = document.getElementById(id);
+    input.value = state.cpf[key];
+    input.addEventListener("input", () => {
+      const v = parseFloat(input.value);
+      state.cpf[key] = Number.isFinite(v) ? v : 0;
+      saveState();
+      updateAccountsTotal();
+      recompute();
+    });
+  }
+  syncCpfUI();
+}
+
+function syncCpfUI() {
+  const on = state.cpf.enabled;
+  document.getElementById("cpf-fields").classList.toggle("cpf-disabled", !on);
+  for (const [id] of CPF_FIELDS) document.getElementById(id).disabled = !on;
+  document.getElementById("cpf-total-line").hidden = !on;
+  updateCpfTotal();
+}
+
+function cpfTotalToday() {
+  const { oa, sa, ma } = state.cpf;
+  return (oa || 0) + (sa || 0) + (ma || 0);
+}
+
+function updateCpfTotal() {
+  document.getElementById("cpf-total-value").textContent = fmtFull(cpfTotalToday());
 }
 
 /* ---------- accounts ---------- */
@@ -152,12 +210,17 @@ function renderAccounts() {
   updateAccountsTotal();
 }
 
-function netWorthToday() {
+function accountsTotal() {
   return state.accounts.reduce((sum, a) => sum + (Number.isFinite(a.value) ? a.value : 0), 0);
+}
+
+function netWorthToday() {
+  return accountsTotal() + (state.cpf.enabled ? cpfTotalToday() : 0);
 }
 
 function updateAccountsTotal() {
   document.getElementById("accounts-total-value").textContent = fmtFull(netWorthToday());
+  updateCpfTotal();
 }
 
 /* ---------- results ---------- */
@@ -166,13 +229,14 @@ function recompute() {
     currentAge: state.currentAge,
     retirementAge: state.retirementAge,
     endAge: state.endAge,
-    startNetWorth: netWorthToday(),
+    startNetWorth: accountsTotal(),
     annualIncome: state.monthlyIncome * 12,
     annualExpenses: state.monthlyExpenses * 12,
     annualRetirementSpend: state.monthlyRetirementSpend * 12,
     returnRate: state.returnRate,
     inflationRate: state.inflationRate,
     incomeGrowthRate: state.incomeGrowthRate,
+    cpf: state.cpf,
   });
 
   renderHero(result);
@@ -200,10 +264,11 @@ function renderTiles(result) {
   const tiles = document.getElementById("tiles");
   tiles.textContent = "";
 
+  const cpfOn = result.cpfEnabled;
   const fiTarget = 25 * state.monthlyRetirementSpend * 12;
   addTile(tiles, "Financial independence target",
     fmtCompact(fiTarget),
-    "25× yearly retirement spending (4% rule), today's money");
+    `25× yearly retirement spending (4% rule), today's money${cpfOn ? ", outside CPF" : ""}`);
 
   addTile(tiles, "Financial independence age",
     result.fiAge === null ? "Not reached" : String(result.fiAge),
@@ -211,13 +276,22 @@ function renderTiles(result) {
       ? `not within this plan (to age ${state.endAge})`
       : `in ${Math.max(0, result.fiAge - state.currentAge)} years`);
 
-  addTile(tiles, "Peak net worth",
-    fmtCompact(result.peak.nominal),
-    `at age ${result.peak.age} (${result.peak.year})`);
+  if (cpfOn && result.cpfLifePayoutAnnual > 0) {
+    addTile(tiles, "CPF LIFE payout",
+      `${fmtCompact(result.cpfLifePayoutAnnual / 12)}/mo`,
+      "estimated for life from age 65, Standard plan");
+  } else {
+    addTile(tiles, "Peak net worth",
+      fmtCompact(result.peak.nominal),
+      `at age ${result.peak.age} (${result.peak.year})`);
+  }
 
   if (result.depletedAge !== null) {
-    addTile(tiles, "Money runs out", `⚠ Age ${result.depletedAge}`,
-      `${result.depletedAge - state.retirementAge} years into retirement`, "tile-critical");
+    addTile(tiles, "Savings run out", `⚠ Age ${result.depletedAge}`,
+      result.cpfLifePayoutAnnual > 0
+        ? `CPF LIFE keeps paying ${fmtCompact(result.cpfLifePayoutAnnual / 12)}/mo`
+        : `${result.depletedAge - state.retirementAge} years into retirement`,
+      "tile-critical");
   } else {
     const last = result.rows[result.rows.length - 1];
     addTile(tiles, "Money lasts", `✓ Past age ${state.endAge}`,
@@ -248,7 +322,10 @@ function renderTable(result) {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const h of ["Age", "Year", "Net worth", "In today's money", "Saved / withdrawn", "Growth"]) {
+  const headers = ["Age", "Year", "Net worth", "In today's money"];
+  if (result.cpfEnabled) headers.push("of which CPF");
+  headers.push("Saved / withdrawn", "Growth");
+  for (const h of headers) {
     const th = document.createElement("th");
     th.textContent = h;
     headRow.append(th);
@@ -262,9 +339,12 @@ function renderTable(result) {
       String(row.year),
       fmtFull(row.nominal),
       fmtFull(row.real),
+    ];
+    if (result.cpfEnabled) cells.push(fmtFull(row.cpfTotal));
+    cells.push(
       row.t === 0 ? "—" : fmtFull(row.cashFlow),
       row.t === 0 ? "—" : fmtFull(row.growth),
-    ];
+    );
     for (const c of cells) {
       const td = document.createElement("td");
       td.textContent = c;
@@ -323,6 +403,9 @@ document.getElementById("reset-data").addEventListener("click", () => {
 function bindPlanInputsValuesOnly() {
   for (const key of PLAN_FIELDS) document.getElementById(`in-${key}`).value = state[key];
   document.getElementById("in-currency").value = state.currency;
+  document.getElementById("in-cpfEnabled").checked = state.cpf.enabled;
+  for (const [id, key] of CPF_FIELDS) document.getElementById(id).value = state.cpf[key];
+  syncCpfUI();
 }
 
 let resizeTimer;
@@ -333,6 +416,7 @@ window.addEventListener("resize", () => {
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", recompute);
 
 bindPlanInputs();
+bindCpfInputs();
 bindViewToggle();
 renderAccounts();
 recompute();
