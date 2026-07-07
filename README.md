@@ -47,8 +47,9 @@ on `file://` URLs.)
 Annual steps, deliberately simple:
 
 - Savings outside CPF compound at the stated investment return.
-- Income is entered **gross** (before CPF); with CPF enabled, the employee's
-  age-banded CPF share is deducted automatically to get take-home pay.
+- Income is entered **gross** (before CPF and tax); the employee's age-banded
+  CPF share and Singapore resident income tax are deducted automatically to
+  get take-home pay (each can be toggled off).
 - While working, yearly savings (take-home income − spending) are added; income
   grows at its own rate and spending rises with inflation.
 - From retirement age on, that year's inflation-adjusted retirement spending is
@@ -57,6 +58,15 @@ Annual steps, deliberately simple:
 - "Today's money" divides nominal values by cumulative inflation.
 - Financial independence is measured against assets *outside* CPF, since CPF is
   locked until the payout age.
+
+### Income tax (Singapore)
+
+Resident progressive rates (YA 2026 schedule, 0% on the first S$20,000 up to
+24% above S$1M) are applied to employment income while working. Chargeable
+income deducts the employee's CPF contributions and the S$1,000 earned income
+relief; other reliefs aren't modelled. CPF LIFE payouts and investment gains
+are untaxed, as in Singapore, so retirement years carry no tax. Brackets are
+held constant in nominal terms.
 
 ### CPF (Singapore)
 
@@ -81,10 +91,10 @@ Simplifications, in the interest of staying understandable: 2026 ceilings and
 retirement sums are held constant in nominal terms (they rise over time in
 reality); contribution allocation uses the under-35 OA/SA/MA split at every
 age; the extra 1% interest on the first S$60,000 and the MediSave cap (BHS)
-are ignored; income tax is not modelled.
+are ignored.
 
-This is a rough planning model, not financial advice — it also ignores taxes,
-sequence-of-returns risk, and asset allocation.
+This is a rough planning model, not financial advice — it also ignores
+sequence-of-returns risk and asset allocation.
 
 CPF parameters (in `js/projection.js`) are based on:
 [CPF contribution rates from 1 Jan 2026](https://www.cpf.gov.sg/employer/employer-obligations/how-much-cpf-contributions-to-pay) ·

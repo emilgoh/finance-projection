@@ -1,4 +1,4 @@
-import { project, CPF } from "./projection.js";
+import { project, CPF, TAX } from "./projection.js";
 import { renderChart } from "./chart.js";
 
 const STORAGE_KEY = "wealth-projection-v3";
@@ -16,6 +16,7 @@ const DEFAULT_STATE = {
   returnRate: 6,
   inflationRate: 2,
   incomeGrowthRate: 3,
+  includeTax: true,
   cpf: {
     enabled: true,
     oa: 30000,
@@ -99,6 +100,13 @@ function bindPlanInputs() {
       }
     });
   }
+  const taxCheck = document.getElementById("in-includeTax");
+  taxCheck.checked = state.includeTax;
+  taxCheck.addEventListener("change", () => {
+    state.includeTax = taxCheck.checked;
+    saveState();
+    recompute();
+  });
   const currency = document.getElementById("in-currency");
   currency.value = state.currency;
   if (currency.value !== state.currency) currency.value = "S$"; // unknown saved symbol
@@ -247,6 +255,7 @@ function recompute() {
     returnRate: state.returnRate,
     inflationRate: state.inflationRate,
     incomeGrowthRate: state.incomeGrowthRate,
+    includeTax: state.includeTax,
     cpf: state.cpf,
   });
 
@@ -265,18 +274,26 @@ function recompute() {
 
 function updateIncomeHint() {
   const hint = document.getElementById("income-hint");
-  if (!state.cpf.enabled || !(state.monthlyGrossIncome > 0)) {
+  const cpfOn = state.cpf.enabled;
+  const taxOn = state.includeTax;
+  if ((!cpfOn && !taxOn) || !(state.monthlyGrossIncome > 0)) {
     hint.hidden = true;
     return;
   }
-  const rate = CPF.employeeRateForAge(state.currentAge);
-  const monthlyCeiling = CPF.OW_CEILING_ANNUAL / 12;
-  const takeHome = state.monthlyGrossIncome
-    - rate * Math.min(state.monthlyGrossIncome, monthlyCeiling);
+  const grossAnnual = state.monthlyGrossIncome * 12;
+  const rate = cpfOn ? CPF.employeeRateForAge(state.currentAge) : 0;
+  const cpfAnnual = rate * Math.min(grossAnnual, CPF.OW_CEILING_ANNUAL);
+  const taxAnnual = taxOn
+    ? TAX.of(Math.max(0, grossAnnual - cpfAnnual - TAX.EARNED_INCOME_RELIEF))
+    : 0;
+  const takeHome = (grossAnnual - cpfAnnual - taxAnnual) / 12;
+  const parts = [];
+  if (cpfOn) parts.push(`${(rate * 100).toLocaleString("en-US")}% CPF at age ${state.currentAge}`);
+  if (taxOn) parts.push(`income tax ≈ ${fmtFull(taxAnnual / 12)}/month`);
   hint.hidden = false;
   hint.textContent =
-    `Take-home after CPF ≈ ${fmtFull(takeHome)}/month ` +
-    `(${(rate * 100).toLocaleString("en-US")}% employee contribution at age ${state.currentAge})`;
+    `Take-home after ${[cpfOn && "CPF", taxOn && "tax"].filter(Boolean).join(" & ")}` +
+    ` ≈ ${fmtFull(takeHome)}/month (${parts.join(" · ")})`;
 }
 
 function renderHero(result) {
@@ -463,6 +480,7 @@ document.getElementById("reset-data").addEventListener("click", () => {
 function bindPlanInputsValuesOnly() {
   for (const key of PLAN_FIELDS) document.getElementById(`in-${key}`).value = state[key];
   document.getElementById("in-currency").value = state.currency;
+  document.getElementById("in-includeTax").checked = state.includeTax;
   document.getElementById("in-cpfEnabled").checked = state.cpf.enabled;
   for (const [id, key] of CPF_FIELDS) document.getElementById(id).value = state.cpf[key];
   syncCpfUI();

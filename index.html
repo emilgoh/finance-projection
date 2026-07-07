@@ -91,6 +91,10 @@
             <input type="number" id="in-incomeGrowthRate" min="0" max="20" step="0.1">
           </label>
         </div>
+        <label class="check-field plan-check">
+          <input type="checkbox" id="in-includeTax">
+          Include Singapore income tax <small>(resident rates)</small>
+        </label>
         <p class="income-hint" id="income-hint" hidden></p>
       </div>
 
@@ -171,6 +175,8 @@
        added yearly, and retirement spending rises with inflation. CPF is modelled
        with 2026 rules held constant (ceilings and retirement sums rise over time in
        reality; extra interest on the first S$60,000 and MediSave caps are ignored).
+       Income tax uses resident rates on employment income, counting only CPF and
+       earned-income reliefs; CPF LIFE payouts and investment gains are untaxed.
        This is a rough model, not financial advice.</p>
     <p>Your data never leaves this browser — it is saved in local storage only.
        <button type="button" id="reset-data" class="btn-link">Reset all data</button></p>

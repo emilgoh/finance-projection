@@ -51,6 +51,32 @@ export const CPF = {
   },
 };
 
+// Singapore resident income tax (YA 2026 schedule), applied to employment
+// income while working. Chargeable income = gross − employee CPF share −
+// earned income relief; other reliefs are ignored. CPF LIFE payouts and
+// investment gains are untaxed (as in Singapore). Brackets are held constant
+// in nominal terms — another simplification.
+export const TAX = {
+  EARNED_INCOME_RELIEF: 1000,
+  BRACKETS: [
+    // [upper bound of bracket, marginal rate]
+    [20000, 0], [30000, 0.02], [40000, 0.035], [80000, 0.07],
+    [120000, 0.115], [160000, 0.15], [200000, 0.18], [240000, 0.19],
+    [280000, 0.195], [320000, 0.20], [500000, 0.22], [1000000, 0.23],
+    [Infinity, 0.24],
+  ],
+  of(chargeable) {
+    let tax = 0;
+    let prev = 0;
+    for (const [cap, rate] of TAX.BRACKETS) {
+      if (chargeable <= prev) break;
+      tax += (Math.min(chargeable, cap) - prev) * rate;
+      prev = cap;
+    }
+    return tax;
+  },
+};
+
 export function project(p) {
   const currentAge = num(p.currentAge, 30);
   const retirementAge = Math.max(currentAge, num(p.retirementAge, 65));
@@ -65,6 +91,7 @@ export function project(p) {
   let expenses = num(p.annualExpenses, 0);
   const retirementSpendToday = num(p.annualRetirementSpend, expenses);
 
+  const taxOn = !!p.includeTax;
   const cpfOn = !!(p.cpf && p.cpf.enabled);
   let oa = cpfOn ? num(p.cpf.oa, 0) : 0;
   let sa = cpfOn ? num(p.cpf.sa, 0) : 0;
@@ -115,13 +142,18 @@ export function project(p) {
 
       if (working) {
         // take-home = gross − the employee's CPF share on the capped wage
+        // − income tax on what remains chargeable
         const employeeShare = cpfOn
           ? Math.min(gross, CPF.OW_CEILING_ANNUAL) * CPF.employeeRateForAge(age - 1)
           : 0;
-        cashFlow = gross - employeeShare - expenses + annualPayout;
+        const tax = taxOn
+          ? TAX.of(Math.max(0, gross - employeeShare - TAX.EARNED_INCOME_RELIEF))
+          : 0;
+        cashFlow = gross - employeeShare - tax - expenses + annualPayout;
         gross *= 1 + g;
         expenses *= 1 + infl;
       } else {
+        // CPF LIFE payouts are tax-exempt; withdrawals aren't income
         cashFlow = annualPayout - retirementSpendToday * deflator;
       }
 

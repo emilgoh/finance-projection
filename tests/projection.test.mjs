@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { project, CPF } from "../js/projection.js";
+import { project, CPF, TAX } from "../js/projection.js";
 
 const base = {
   currentAge: 30,
@@ -180,6 +180,46 @@ test("CPF: senior contribution rates step down with age", () => {
   assert.equal(CPF.rateForAge(62), 0.25);
   assert.equal(CPF.rateForAge(67), 0.165);
   assert.equal(CPF.rateForAge(75), 0.125);
+});
+
+/* ---------- Singapore income tax ---------- */
+
+test("tax brackets match IRAS cumulative figures", () => {
+  // published "gross tax payable" checkpoints for the resident schedule
+  const expected = [
+    [20000, 0], [30000, 200], [40000, 550], [80000, 3350],
+    [120000, 7950], [160000, 13950], [200000, 21150], [320000, 44550],
+    [500000, 84150], [1000000, 199150], [1100000, 223150],
+  ];
+  for (const [chargeable, tax] of expected) {
+    assert.ok(Math.abs(TAX.of(chargeable) - tax) < 1e-6, `at ${chargeable}`);
+  }
+  assert.equal(TAX.of(0), 0);
+});
+
+test("tax: deducted from working-year savings, after CPF relief", () => {
+  const { rows } = project({ ...cpfBase, includeTax: true });
+  // chargeable = 60,000 − 12,000 employee CPF − 1,000 relief = 47,000
+  const tax = TAX.of(47000);
+  assert.ok(Math.abs(tax - 1040) < 1e-6);
+  const takeHome = 60000 - 12000 - tax;
+  assert.ok(Math.abs(rows[1].liquid - (40000 * 1.06 + takeHome - 42000)) < 1e-6);
+});
+
+test("tax: retirement withdrawals and CPF LIFE payouts are untaxed", () => {
+  const taxed = project({ ...cpfBase, includeTax: true });
+  const untaxed = project(cpfBase);
+  const iRetire = taxed.rows.findIndex((r) => r.age === 66);
+  // same retirement-year cash flow whether or not tax is enabled
+  assert.ok(
+    Math.abs(taxed.rows[iRetire].cashFlow - untaxed.rows[iRetire].cashFlow) < 1e-6,
+  );
+});
+
+test("tax off by default: engine unchanged without includeTax", () => {
+  const a = project(base);
+  const b = project({ ...base, includeTax: false });
+  assert.deepEqual(a.rows.map((r) => r.nominal), b.rows.map((r) => r.nominal));
 });
 
 test("CPF disabled: identical to the plain projection", () => {
