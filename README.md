@@ -8,6 +8,11 @@ financial independence, and whether your money lasts through retirement.
 Everything runs in the browser; your data is saved to local storage and never
 leaves your machine.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot-light.png" alt="Wealth Projection: plan inputs, accounts, projected net worth at retirement, stat tiles, and a net-worth-over-time chart">
+</picture>
+
 ## Running it
 
 It's a static site — no build step, no dependencies. Serve the folder and open it:
