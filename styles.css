@@ -110,6 +110,9 @@ button { font: inherit; color: inherit; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field-label { font-size: 0.8rem; color: var(--text-secondary); }
 .field-label small { color: var(--text-muted); font-size: 0.72rem; }
+.income-hint { margin: 10px 0 0; font-size: 0.8rem; color: var(--text-muted); }
+.plan-check { margin-top: 14px; }
+.plan-check small { color: var(--text-muted); font-size: 0.75rem; }
 input[type="number"], select, .account-row input, .account-row select {
   background: var(--page);
   color: var(--text-primary);

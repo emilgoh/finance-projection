@@ -1,7 +1,8 @@
-import { project } from "./projection.js";
+import { project, CPF, TAX } from "./projection.js";
 import { renderChart } from "./chart.js";
 
-const STORAGE_KEY = "wealth-projection-v2";
+const STORAGE_KEY = "wealth-projection-v3";
+const LEGACY_STORAGE_KEY = "wealth-projection-v2";
 
 const DEFAULT_STATE = {
   theme: "system",
@@ -9,15 +10,15 @@ const DEFAULT_STATE = {
   currentAge: 30,
   retirementAge: 65,
   endAge: 95,
-  monthlyIncome: 4800,
+  monthlyGrossIncome: 6000,
   monthlyExpenses: 3500,
   monthlyRetirementSpend: 3500,
   returnRate: 6,
   inflationRate: 2,
   incomeGrowthRate: 3,
+  includeTax: true,
   cpf: {
     enabled: true,
-    grossMonthlySalary: 6000,
     oa: 30000,
     sa: 12000,
     ma: 18000,
@@ -38,14 +39,25 @@ let disposeChart = () => {};
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw);
-      const merged = { ...structuredClone(DEFAULT_STATE), ...saved };
-      merged.cpf = { ...structuredClone(DEFAULT_STATE.cpf), ...(saved.cpf || {}) };
-      return merged;
+    if (raw) return mergeSaved(JSON.parse(raw));
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) {
+      // v2 stored take-home income plus a separate CPF gross salary; income
+      // is now gross, so prefer the old gross salary when it exists.
+      const old = JSON.parse(legacy);
+      old.monthlyGrossIncome = old.cpf?.grossMonthlySalary ?? old.monthlyIncome;
+      delete old.monthlyIncome;
+      return mergeSaved(old);
     }
   } catch { /* corrupt storage — fall back to defaults */ }
   return structuredClone(DEFAULT_STATE);
+}
+
+function mergeSaved(saved) {
+  const merged = { ...structuredClone(DEFAULT_STATE), ...saved };
+  merged.cpf = { ...structuredClone(DEFAULT_STATE.cpf), ...(saved.cpf || {}) };
+  delete merged.cpf.grossMonthlySalary;
+  return merged;
 }
 
 function saveState() {
@@ -71,7 +83,7 @@ function fmtFull(v) {
 
 /* ---------- plan inputs ---------- */
 const PLAN_FIELDS = [
-  "currentAge", "retirementAge", "endAge", "monthlyIncome", "monthlyExpenses",
+  "currentAge", "retirementAge", "endAge", "monthlyGrossIncome", "monthlyExpenses",
   "monthlyRetirementSpend", "returnRate", "inflationRate", "incomeGrowthRate",
 ];
 
@@ -88,6 +100,13 @@ function bindPlanInputs() {
       }
     });
   }
+  const taxCheck = document.getElementById("in-includeTax");
+  taxCheck.checked = state.includeTax;
+  taxCheck.addEventListener("change", () => {
+    state.includeTax = taxCheck.checked;
+    saveState();
+    recompute();
+  });
   const currency = document.getElementById("in-currency");
   currency.value = state.currency;
   if (currency.value !== state.currency) currency.value = "S$"; // unknown saved symbol
@@ -101,7 +120,6 @@ function bindPlanInputs() {
 
 /* ---------- CPF ---------- */
 const CPF_FIELDS = [
-  ["in-cpfSalary", "grossMonthlySalary"],
   ["in-cpfOa", "oa"],
   ["in-cpfSa", "sa"],
   ["in-cpfMa", "ma"],
@@ -231,15 +249,17 @@ function recompute() {
     retirementAge: state.retirementAge,
     endAge: state.endAge,
     startNetWorth: accountsTotal(),
-    annualIncome: state.monthlyIncome * 12,
+    annualGrossIncome: state.monthlyGrossIncome * 12,
     annualExpenses: state.monthlyExpenses * 12,
     annualRetirementSpend: state.monthlyRetirementSpend * 12,
     returnRate: state.returnRate,
     inflationRate: state.inflationRate,
     incomeGrowthRate: state.incomeGrowthRate,
+    includeTax: state.includeTax,
     cpf: state.cpf,
   });
 
+  updateIncomeHint();
   renderHero(result);
   renderTiles(result);
   disposeChart();
@@ -250,6 +270,30 @@ function recompute() {
   });
   renderTable(result);
   updateChartAria(result);
+}
+
+function updateIncomeHint() {
+  const hint = document.getElementById("income-hint");
+  const cpfOn = state.cpf.enabled;
+  const taxOn = state.includeTax;
+  if ((!cpfOn && !taxOn) || !(state.monthlyGrossIncome > 0)) {
+    hint.hidden = true;
+    return;
+  }
+  const grossAnnual = state.monthlyGrossIncome * 12;
+  const rate = cpfOn ? CPF.employeeRateForAge(state.currentAge) : 0;
+  const cpfAnnual = rate * Math.min(grossAnnual, CPF.OW_CEILING_ANNUAL);
+  const taxAnnual = taxOn
+    ? TAX.of(Math.max(0, grossAnnual - cpfAnnual - TAX.EARNED_INCOME_RELIEF))
+    : 0;
+  const takeHome = (grossAnnual - cpfAnnual - taxAnnual) / 12;
+  const parts = [];
+  if (cpfOn) parts.push(`${(rate * 100).toLocaleString("en-US")}% CPF at age ${state.currentAge}`);
+  if (taxOn) parts.push(`income tax ≈ ${fmtFull(taxAnnual / 12)}/month`);
+  hint.hidden = false;
+  hint.textContent =
+    `Take-home after ${[cpfOn && "CPF", taxOn && "tax"].filter(Boolean).join(" & ")}` +
+    ` ≈ ${fmtFull(takeHome)}/month (${parts.join(" · ")})`;
 }
 
 function renderHero(result) {
@@ -436,6 +480,7 @@ document.getElementById("reset-data").addEventListener("click", () => {
 function bindPlanInputsValuesOnly() {
   for (const key of PLAN_FIELDS) document.getElementById(`in-${key}`).value = state[key];
   document.getElementById("in-currency").value = state.currency;
+  document.getElementById("in-includeTax").checked = state.includeTax;
   document.getElementById("in-cpfEnabled").checked = state.cpf.enabled;
   for (const [id, key] of CPF_FIELDS) document.getElementById(id).value = state.cpf[key];
   syncCpfUI();
