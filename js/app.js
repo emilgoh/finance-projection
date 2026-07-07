@@ -4,6 +4,7 @@ import { renderChart } from "./chart.js";
 const STORAGE_KEY = "wealth-projection-v2";
 
 const DEFAULT_STATE = {
+  theme: "system",
   currency: "S$",
   currentAge: 30,
   retirementAge: 65,
@@ -365,6 +366,37 @@ function updateChartAria(result) {
     `${fmtFull(last.nominal)} at age ${last.age}. Full figures in the table view.`);
 }
 
+/* ---------- theme ---------- */
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+
+function effectiveTheme() {
+  if (state.theme === "light" || state.theme === "dark") return state.theme;
+  return darkQuery.matches ? "dark" : "light";
+}
+
+function applyTheme() {
+  if (state.theme === "light" || state.theme === "dark") {
+    document.documentElement.setAttribute("data-theme", state.theme);
+  } else {
+    document.documentElement.removeAttribute("data-theme"); // follow the system
+  }
+  const dark = effectiveTheme() === "dark";
+  // the icon shows what a click switches to
+  document.getElementById("theme-icon-moon").hidden = dark;
+  document.getElementById("theme-icon-sun").hidden = !dark;
+  document.getElementById("theme-toggle")
+    .setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+}
+
+function bindThemeToggle() {
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    state.theme = effectiveTheme() === "dark" ? "light" : "dark";
+    saveState();
+    applyTheme();
+    recompute(); // the chart samples theme colors at render time
+  });
+}
+
 /* ---------- view toggle ---------- */
 function bindViewToggle() {
   const chartBtn = document.getElementById("view-chart");
@@ -396,6 +428,7 @@ document.getElementById("reset-data").addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
   state = structuredClone(DEFAULT_STATE);
   bindPlanInputsValuesOnly();
+  applyTheme();
   renderAccounts();
   recompute();
 });
@@ -413,8 +446,13 @@ window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(recompute, 150);
 });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", recompute);
+darkQuery.addEventListener("change", () => {
+  applyTheme(); // refresh the icon when following the system
+  recompute();
+});
 
+applyTheme();
+bindThemeToggle();
 bindPlanInputs();
 bindCpfInputs();
 bindViewToggle();
