@@ -67,8 +67,8 @@
             </select>
           </label>
           <label class="field">
-            <span class="field-label">Monthly take-home income <small>(after CPF &amp; tax)</small></span>
-            <input type="number" id="in-monthlyIncome" min="0" step="100">
+            <span class="field-label">Monthly gross income <small>(before CPF)</small></span>
+            <input type="number" id="in-monthlyGrossIncome" min="0" step="100">
           </label>
           <label class="field">
             <span class="field-label">Monthly spending</span>
@@ -91,6 +91,7 @@
             <input type="number" id="in-incomeGrowthRate" min="0" max="20" step="0.1">
           </label>
         </div>
+        <p class="income-hint" id="income-hint" hidden></p>
       </div>
 
       <div class="card">
@@ -112,10 +113,6 @@
         </div>
         <div class="field-grid" id="cpf-fields">
           <label class="field">
-            <span class="field-label">Gross monthly salary <small>(before CPF)</small></span>
-            <input type="number" id="in-cpfSalary" min="0" step="100">
-          </label>
-          <label class="field">
             <span class="field-label">Ordinary Account (OA)</span>
             <input type="number" id="in-cpfOa" min="0" step="1000">
           </label>
@@ -130,10 +127,11 @@
         </div>
         <p class="cpf-note">
           <span id="cpf-total-line">CPF today: <strong id="cpf-total-value"></strong> · </span>
-          Uses 2026 rules, simplified: contributions on salary up to S$8,000/month at
-          age-banded rates, 2.5% interest on OA and 4% on SA/MediSave, and CPF LIFE
-          (Standard plan estimate) turning OA+SA — up to the Enhanced Retirement Sum —
-          into lifelong payouts from age 65.
+          Uses 2026 rules, simplified: contributions are worked out from your gross
+          income automatically — age-banded rates on pay up to S$8,000/month —
+          with 2.5% interest on OA and 4% on SA/MediSave, and CPF LIFE (Standard
+          plan estimate) turning OA+SA — up to the Enhanced Retirement Sum — into
+          lifelong payouts from age 65.
         </p>
       </div>
     </section>

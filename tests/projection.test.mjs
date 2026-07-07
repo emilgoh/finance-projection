@@ -7,7 +7,7 @@ const base = {
   retirementAge: 65,
   endAge: 90,
   startNetWorth: 40000,
-  annualIncome: 60000,
+  annualGrossIncome: 60000,
   annualExpenses: 42000,
   annualRetirementSpend: 42000,
   returnRate: 6,
@@ -58,7 +58,7 @@ test("depletion is detected and balance floors at zero", () => {
   const result = project({
     ...base,
     startNetWorth: 0,
-    annualIncome: 42000, // saves nothing
+    annualGrossIncome: 42000, // saves nothing
     returnRate: 0,
   });
   assert.notEqual(result.depletedAge, null);
@@ -98,25 +98,39 @@ test("string and missing inputs fall back safely", () => {
 
 const cpfBase = {
   ...base,
-  cpf: { enabled: true, grossMonthlySalary: 5000, oa: 30000, sa: 12000, ma: 18000 },
+  cpf: { enabled: true, oa: 30000, sa: 12000, ma: 18000 },
 };
 
 test("CPF: first-year contributions and interest on each account", () => {
   const { rows } = project(cpfBase);
-  // salary 60,000 < ceiling; total contribution 37%, split 23/6/8
+  // gross 60,000 < ceiling; total contribution 37%, split 23/6/8
   const oa = 30000 * 1.025 + 60000 * 0.23;
   const sa = 12000 * 1.04 + 60000 * 0.06;
   const ma = 18000 * 1.04 + 60000 * 0.08;
   assert.ok(Math.abs(rows[1].cpfTotal - (oa + sa + ma)) < 1e-6);
-  // liquid net worth unchanged by CPF: same as the no-CPF projection
-  const plain = project(base);
-  assert.ok(Math.abs(rows[1].liquid - plain.rows[1].nominal) < 1e-6);
 });
 
-test("CPF: contributions are capped at the Ordinary Wage ceiling", () => {
-  const low = project({ ...cpfBase, cpf: { ...cpfBase.cpf, grossMonthlySalary: 8000 } });
-  const high = project({ ...cpfBase, cpf: { ...cpfBase.cpf, grossMonthlySalary: 20000 } });
+test("CPF: employee share is deducted from gross to get take-home", () => {
+  const { rows } = project(cpfBase);
+  // take-home = 60,000 − 20% employee share; savings = take-home − expenses
+  const takeHome = 60000 * (1 - 0.2);
+  assert.ok(Math.abs(rows[1].liquid - (40000 * 1.06 + takeHome - 42000)) < 1e-6);
+});
+
+test("CPF: contributions and deduction are capped at the Ordinary Wage ceiling", () => {
+  const low = project({ ...cpfBase, annualGrossIncome: 96000 });
+  const high = project({ ...cpfBase, annualGrossIncome: 240000 });
   assert.ok(Math.abs(low.rows[1].cpfTotal - high.rows[1].cpfTotal) < 1e-6);
+  // above the ceiling every extra dollar is take-home, none goes to CPF
+  assert.ok(Math.abs((high.rows[1].liquid - low.rows[1].liquid) - (240000 - 96000)) < 1e-6);
+});
+
+test("CPF: employee contribution rates step down with age", () => {
+  assert.equal(CPF.employeeRateForAge(50), 0.2);
+  assert.equal(CPF.employeeRateForAge(57), 0.18);
+  assert.equal(CPF.employeeRateForAge(62), 0.125);
+  assert.equal(CPF.employeeRateForAge(67), 0.075);
+  assert.equal(CPF.employeeRateForAge(75), 0.05);
 });
 
 test("CPF: net worth today includes CPF balances", () => {

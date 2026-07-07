@@ -47,6 +47,8 @@ on `file://` URLs.)
 Annual steps, deliberately simple:
 
 - Savings outside CPF compound at the stated investment return.
+- Income is entered **gross** (before CPF); with CPF enabled, the employee's
+  age-banded CPF share is deducted automatically to get take-home pay.
 - While working, yearly savings (take-home income − spending) are added; income
   grows at its own rate and spending rises with inflation.
 - From retirement age on, that year's inflation-adjusted retirement spending is
@@ -60,9 +62,12 @@ Annual steps, deliberately simple:
 
 The optional CPF module models the Central Provident Fund with 2026 rules:
 
-- **Contributions** — total (employer + employee) rates on gross salary up to
-  the S$8,000/month Ordinary Wage ceiling: 37% up to age 55, then 34%
-  (55–60), 25% (60–65), 16.5% (65–70), and 12.5% after 70, while you work.
+- **Contributions** — worked out automatically from your gross income: total
+  (employer + employee) rates on pay up to the S$8,000/month Ordinary Wage
+  ceiling are 37% up to age 55, then 34% (55–60), 25% (60–65), 16.5% (65–70),
+  and 12.5% after 70, while you work. The employee's share of that (20%,
+  stepping down to 5% by the same age bands) comes out of gross pay; the
+  employer's share is on top.
 - **Interest** — 2.5% on the Ordinary Account, 4% on Special Account and
   MediSave (the floor rates).
 - **CPF LIFE** — at 65, OA+SA up to the Enhanced Retirement Sum (S$440,800) is
@@ -76,8 +81,7 @@ Simplifications, in the interest of staying understandable: 2026 ceilings and
 retirement sums are held constant in nominal terms (they rise over time in
 reality); contribution allocation uses the under-35 OA/SA/MA split at every
 age; the extra 1% interest on the first S$60,000 and the MediSave cap (BHS)
-are ignored; take-home income is assumed to already exclude the employee's
-CPF share.
+are ignored; income tax is not modelled.
 
 This is a rough planning model, not financial advice — it also ignores taxes,
 sequence-of-returns risk, and asset allocation.
