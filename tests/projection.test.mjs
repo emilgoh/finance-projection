@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { project } from "../js/projection.js";
+import { project, CPF } from "../js/projection.js";
 
 const base = {
   currentAge: 30,
@@ -91,5 +91,88 @@ test("retirement at current age: no contributions, immediate drawdown", () => {
 test("string and missing inputs fall back safely", () => {
   const { rows } = project({ currentAge: "40", retirementAge: "65" });
   assert.equal(rows[0].age, 40);
-  assert.equal(rows.at(-1).age, 90);
+  assert.equal(rows.at(-1).age, 95);
+});
+
+/* ---------- CPF (Singapore) ---------- */
+
+const cpfBase = {
+  ...base,
+  cpf: { enabled: true, grossMonthlySalary: 5000, oa: 30000, sa: 12000, ma: 18000 },
+};
+
+test("CPF: first-year contributions and interest on each account", () => {
+  const { rows } = project(cpfBase);
+  // salary 60,000 < ceiling; total contribution 37%, split 23/6/8
+  const oa = 30000 * 1.025 + 60000 * 0.23;
+  const sa = 12000 * 1.04 + 60000 * 0.06;
+  const ma = 18000 * 1.04 + 60000 * 0.08;
+  assert.ok(Math.abs(rows[1].cpfTotal - (oa + sa + ma)) < 1e-6);
+  // liquid net worth unchanged by CPF: same as the no-CPF projection
+  const plain = project(base);
+  assert.ok(Math.abs(rows[1].liquid - plain.rows[1].nominal) < 1e-6);
+});
+
+test("CPF: contributions are capped at the Ordinary Wage ceiling", () => {
+  const low = project({ ...cpfBase, cpf: { ...cpfBase.cpf, grossMonthlySalary: 8000 } });
+  const high = project({ ...cpfBase, cpf: { ...cpfBase.cpf, grossMonthlySalary: 20000 } });
+  assert.ok(Math.abs(low.rows[1].cpfTotal - high.rows[1].cpfTotal) < 1e-6);
+});
+
+test("CPF: net worth today includes CPF balances", () => {
+  const { rows } = project(cpfBase);
+  assert.equal(rows[0].nominal, 40000 + 30000 + 12000 + 18000);
+});
+
+test("CPF LIFE: OA+SA annuitized at 65, payout offsets retirement spending", () => {
+  const result = project(cpfBase);
+  const at65 = result.rows.find((r) => r.age === 65);
+  const at66 = result.rows.find((r) => r.age === 66);
+  // after annuitization CPF holds only MediSave + the annuity pool
+  assert.ok(result.cpfLifePayoutAnnual > 0);
+  assert.ok(at65.cpfTotal > 0);
+  // the pool amortizes: one payout out (9.7% of pool) far exceeds MA interest
+  assert.ok(at66.cpfTotal < at65.cpfTotal);
+  // retirement cash flow = payout − spending (partially offset)
+  const spend66 = 42000 * 1.025 ** at66.t;
+  assert.ok(Math.abs(at66.cashFlow - (result.cpfLifePayoutAnnual - spend66)) < 1e-6);
+});
+
+test("CPF LIFE: excess above the ERS becomes liquid at 65", () => {
+  const result = project({
+    ...cpfBase,
+    cpf: { ...cpfBase.cpf, oa: 600000, sa: 100000 },
+  });
+  assert.ok(Math.abs(result.cpfLifePayoutAnnual - CPF.ERS * CPF.LIFE_PAYOUT_RATE) < 1e-6);
+  // the amount above the ERS moved out of CPF into liquid savings
+  const at64 = result.rows.find((r) => r.age === 64);
+  const at65 = result.rows.find((r) => r.age === 65);
+  assert.ok(at65.liquid > at64.liquid + 100000);
+});
+
+test("CPF: FI age uses liquid assets only (CPF is locked)", () => {
+  // huge CPF, no liquid: not FI at the start
+  const result = project({
+    ...cpfBase,
+    startNetWorth: 0,
+    cpf: { ...cpfBase.cpf, oa: 2000000 },
+  });
+  assert.notEqual(result.fiAge, 30);
+});
+
+test("CPF: senior contribution rates step down with age", () => {
+  assert.equal(CPF.rateForAge(50), 0.37);
+  assert.equal(CPF.rateForAge(57), 0.34);
+  assert.equal(CPF.rateForAge(62), 0.25);
+  assert.equal(CPF.rateForAge(67), 0.165);
+  assert.equal(CPF.rateForAge(75), 0.125);
+});
+
+test("CPF disabled: identical to the plain projection", () => {
+  const off = project({ ...base, cpf: { enabled: false, oa: 999999 } });
+  const plain = project(base);
+  assert.deepEqual(
+    off.rows.map((r) => r.nominal),
+    plain.rows.map((r) => r.nominal),
+  );
 });
