@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wealth Projection</title>
+  <meta name="description" content="Track what you own today and project your wealth into the future.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1>Wealth Projection</h1>
+      <p class="tagline">Track what you own today and see where it takes you.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="inputs-grid" aria-label="Your financial inputs">
+      <div class="card">
+        <h2>Your plan</h2>
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">Current age</span>
+            <input type="number" id="in-currentAge" min="16" max="100" step="1">
+          </label>
+          <label class="field">
+            <span class="field-label">Retirement age</span>
+            <input type="number" id="in-retirementAge" min="17" max="100" step="1">
+          </label>
+          <label class="field">
+            <span class="field-label">Plan until age</span>
+            <input type="number" id="in-endAge" min="18" max="120" step="1">
+          </label>
+          <label class="field">
+            <span class="field-label">Currency</span>
+            <select id="in-currency">
+              <option value="$">$ — dollar</option>
+              <option value="€">€ — euro</option>
+              <option value="£">£ — pound</option>
+              <option value="S$">S$ — Singapore dollar</option>
+              <option value="¥">¥ — yen / yuan</option>
+              <option value="kr">kr — krona</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Monthly take-home income</span>
+            <input type="number" id="in-monthlyIncome" min="0" step="100">
+          </label>
+          <label class="field">
+            <span class="field-label">Monthly spending</span>
+            <input type="number" id="in-monthlyExpenses" min="0" step="100">
+          </label>
+          <label class="field">
+            <span class="field-label">Monthly spending in retirement <small>(today's money)</small></span>
+            <input type="number" id="in-monthlyRetirementSpend" min="0" step="100">
+          </label>
+          <label class="field">
+            <span class="field-label">Annual investment return %</span>
+            <input type="number" id="in-returnRate" min="-20" max="30" step="0.1">
+          </label>
+          <label class="field">
+            <span class="field-label">Annual inflation %</span>
+            <input type="number" id="in-inflationRate" min="0" max="20" step="0.1">
+          </label>
+          <label class="field">
+            <span class="field-label">Annual income growth %</span>
+            <input type="number" id="in-incomeGrowthRate" min="0" max="20" step="0.1">
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>What you own today</h2>
+        <div id="accounts-list" class="accounts-list"></div>
+        <div class="accounts-footer">
+          <button type="button" id="add-account" class="btn">+ Add account</button>
+          <p class="accounts-total">Net worth today: <strong id="accounts-total-value"></strong></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="results" aria-label="Projection results">
+      <div class="card hero-card">
+        <p class="hero-label" id="hero-label">Projected net worth at retirement</p>
+        <p class="hero-value" id="hero-value">—</p>
+        <p class="hero-sub" id="hero-sub"></p>
+      </div>
+
+      <div class="tiles" id="tiles"></div>
+
+      <div class="card chart-card">
+        <div class="chart-header">
+          <div>
+            <h2 id="chart-title">Net worth over time</h2>
+            <ul class="legend" aria-hidden="false">
+              <li><span class="legend-key key-nominal"></span>Projected net worth</li>
+              <li><span class="legend-key key-real"></span>In today's money</li>
+            </ul>
+          </div>
+          <div class="view-toggle" role="tablist" aria-label="Chart or table view">
+            <button type="button" role="tab" id="view-chart" aria-selected="true">Chart</button>
+            <button type="button" role="tab" id="view-table" aria-selected="false">Table</button>
+          </div>
+        </div>
+        <div id="chart" class="chart-region" tabindex="0" role="img"
+             aria-describedby="chart-title"></div>
+        <div id="table-view" class="table-view" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer wrap">
+    <p>Assumes your full net worth compounds at the stated return, savings are added
+       yearly, and retirement spending rises with inflation. This is a rough model,
+       not financial advice.</p>
+    <p>Your data never leaves this browser — it is saved in local storage only.
+       <button type="button" id="reset-data" class="btn-link">Reset all data</button></p>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
