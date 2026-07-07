@@ -1,35 +1,25 @@
-/* ---------- theme tokens (light default, dark via media query) ---------- */
+/* ---------- theme tokens ----------
+   Each token is light-dark(light, dark); which side applies is driven by
+   color-scheme: the system preference by default, or the user's explicit
+   choice via data-theme on <html> (set by the header toggle). */
+:root { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
 :root {
-  --page:            #f9f9f7;
-  --surface-1:       #fcfcfb;
-  --text-primary:    #0b0b0b;
-  --text-secondary:  #52514e;
+  --page:            light-dark(#f9f9f7, #0d0d0d);
+  --surface-1:       light-dark(#fcfcfb, #1a1a19);
+  --text-primary:    light-dark(#0b0b0b, #ffffff);
+  --text-secondary:  light-dark(#52514e, #c3c2b7);
   --text-muted:      #898781;
-  --gridline:        #e1e0d9;
-  --baseline:        #c3c2b7;
-  --border:          rgba(11, 11, 11, 0.10);
-  --series-nominal:  #2a78d6;   /* categorical slot 1 — blue  */
-  --series-real:     #1baf7a;   /* categorical slot 2 — aqua  */
-  --status-good:     #006300;   /* success as text, light */
+  --gridline:        light-dark(#e1e0d9, #2c2c2a);
+  --baseline:        light-dark(#c3c2b7, #383835);
+  --border:          light-dark(rgba(11, 11, 11, 0.10), rgba(255, 255, 255, 0.10));
+  --series-nominal:  light-dark(#2a78d6, #3987e5);   /* categorical slot 1 — blue */
+  --series-real:     light-dark(#1baf7a, #199e70);   /* categorical slot 2 — aqua */
+  --status-good:     light-dark(#006300, #0ca30c);   /* success as text */
   --status-critical: #d03b3b;
-  --focus-ring:      #2a78d6;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --page:            #0d0d0d;
-    --surface-1:       #1a1a19;
-    --text-primary:    #ffffff;
-    --text-secondary:  #c3c2b7;
-    --text-muted:      #898781;
-    --gridline:        #2c2c2a;
-    --baseline:        #383835;
-    --border:          rgba(255, 255, 255, 0.10);
-    --series-nominal:  #3987e5;
-    --series-real:     #199e70;
-    --status-good:     #0ca30c;
-    --status-critical: #d03b3b;
-    --focus-ring:      #3987e5;
-  }
+  --focus-ring:      light-dark(#2a78d6, #3987e5);
 }
 
 /* ---------- base ---------- */
@@ -46,6 +36,11 @@ h2 { font-size: 1.05rem; margin: 0 0 14px; }
 button { font: inherit; color: inherit; }
 
 .site-header { padding: 28px 0 8px; }
+.header-row {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 12px; flex-wrap: wrap;
+}
+.theme-toggle { background: var(--surface-1); }
 .tagline { color: var(--text-secondary); margin: 4px 0 0; }
 
 .card {
@@ -200,7 +195,8 @@ input:focus-visible, select:focus-visible, button:focus-visible, .chart-region:f
   background: none; border: none; padding: 6px 14px; cursor: pointer;
   color: var(--text-secondary); font-size: 0.85rem;
 }
-.view-toggle button[aria-selected="true"] {
+.view-toggle button[aria-selected="true"],
+.view-toggle button[aria-pressed="true"] {
   background: var(--page);
   color: var(--text-primary);
   font-weight: 600;

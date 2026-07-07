@@ -11,8 +11,16 @@ export function renderChart(container, result, opts) {
   const rows = result.rows;
   if (rows.length < 2) return () => {};
 
-  const css = getComputedStyle(document.documentElement);
-  const color = (name) => css.getPropertyValue(name).trim();
+  // Resolve tokens through a probe element's computed color: custom
+  // properties hold unresolved light-dark() expressions, and SVG attribute
+  // parsing of those varies by browser — a computed color is always concrete.
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  container.append(probe);
+  const color = (name) => {
+    probe.style.color = `var(${name})`;
+    return getComputedStyle(probe).color;
+  };
   const C = {
     nominal: color("--series-nominal"),
     real: color("--series-real"),
@@ -22,6 +30,7 @@ export function renderChart(container, result, opts) {
     ink: color("--text-primary"),
     surface: color("--surface-1"),
   };
+  probe.remove();
 
   const width = Math.max(320, container.clientWidth || 640);
   const height = 380;

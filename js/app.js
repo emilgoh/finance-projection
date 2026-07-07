@@ -4,6 +4,7 @@ import { renderChart } from "./chart.js";
 const STORAGE_KEY = "wealth-projection-v2";
 
 const DEFAULT_STATE = {
+  theme: "system",
   currency: "S$",
   currentAge: 30,
   retirementAge: 65,
@@ -365,6 +366,29 @@ function updateChartAria(result) {
     `${fmtFull(last.nominal)} at age ${last.age}. Full figures in the table view.`);
 }
 
+/* ---------- theme ---------- */
+const themeButtons = document.querySelectorAll("[data-theme-choice]");
+
+function applyTheme() {
+  const theme = ["light", "dark"].includes(state.theme) ? state.theme : "system";
+  if (theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  for (const btn of themeButtons) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.themeChoice === theme));
+  }
+}
+
+function bindThemeToggle() {
+  for (const btn of themeButtons) {
+    btn.addEventListener("click", () => {
+      state.theme = btn.dataset.themeChoice;
+      saveState();
+      applyTheme();
+      recompute(); // the chart samples theme colors at render time
+    });
+  }
+}
+
 /* ---------- view toggle ---------- */
 function bindViewToggle() {
   const chartBtn = document.getElementById("view-chart");
@@ -396,6 +420,7 @@ document.getElementById("reset-data").addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
   state = structuredClone(DEFAULT_STATE);
   bindPlanInputsValuesOnly();
+  applyTheme();
   renderAccounts();
   recompute();
 });
@@ -415,6 +440,8 @@ window.addEventListener("resize", () => {
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", recompute);
 
+applyTheme();
+bindThemeToggle();
 bindPlanInputs();
 bindCpfInputs();
 bindViewToggle();

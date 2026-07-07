@@ -35,8 +35,9 @@ on `file://` URLs.)
   spending, the 4% rule), the age you reach it, peak net worth, and whether your
   money lasts to the end of the plan.
 - **Interactive chart** — net worth over time, nominal and inflation-adjusted,
-  with a retirement marker, crosshair tooltip (mouse or arrow keys), and
-  automatic light/dark theme.
+  with a retirement marker and a crosshair tooltip (mouse or arrow keys).
+- **Light & dark mode** — follows your system by default, with a header toggle
+  (Auto / Light / Dark) to override it; the choice is remembered.
 - **Table view** — the same projection as year-by-year figures: net worth,
   today's-money value, CPF balance, amount saved or withdrawn, and investment
   growth.

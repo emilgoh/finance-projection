@@ -5,14 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Wealth Projection</title>
   <meta name="description" content="Track what you own today and project your wealth into the future.">
+  <script>
+    // apply the saved theme before first paint to avoid a flash
+    try {
+      const theme = JSON.parse(localStorage.getItem("wealth-projection-v2")).theme;
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    } catch { /* no saved state */ }
+  </script>
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E">
 </head>
 <body>
   <header class="site-header">
-    <div class="wrap">
-      <h1>Wealth Projection</h1>
-      <p class="tagline">Track what you own today and see where it takes you.</p>
+    <div class="wrap header-row">
+      <div>
+        <h1>Wealth Projection</h1>
+        <p class="tagline">Track what you own today and see where it takes you.</p>
+      </div>
+      <div class="view-toggle theme-toggle" role="group" aria-label="Color theme">
+        <button type="button" data-theme-choice="system" aria-pressed="true">Auto</button>
+        <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      </div>
     </div>
   </header>
 
