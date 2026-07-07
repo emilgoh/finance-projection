@@ -36,8 +36,8 @@ on `file://` URLs.)
   money lasts to the end of the plan.
 - **Interactive chart** — net worth over time, nominal and inflation-adjusted,
   with a retirement marker and a crosshair tooltip (mouse or arrow keys).
-- **Light & dark mode** — follows your system by default, with a header toggle
-  (Auto / Light / Dark) to override it; the choice is remembered.
+- **Light & dark mode** — follows your system by default; the sun/moon button
+  in the top-right corner switches theme, and the choice is remembered.
 - **Table view** — the same projection as year-by-year figures: net worth,
   today's-money value, CPF balance, amount saved or withdrawn, and investment
   growth.

@@ -1,25 +1,54 @@
 /* ---------- theme tokens ----------
-   Each token is light-dark(light, dark); which side applies is driven by
-   color-scheme: the system preference by default, or the user's explicit
-   choice via data-theme on <html> (set by the header toggle). */
-:root { color-scheme: light dark; }
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"] { color-scheme: dark; }
-
+   Light is the base; dark applies via the system preference unless the user
+   forced light, and always via an explicit data-theme="dark" on <html>
+   (set by the header toggle). The dark block appears twice on purpose —
+   media queries and attribute selectors can't share one rule, and this
+   works in every browser with CSS variables. */
 :root {
-  --page:            light-dark(#f9f9f7, #0d0d0d);
-  --surface-1:       light-dark(#fcfcfb, #1a1a19);
-  --text-primary:    light-dark(#0b0b0b, #ffffff);
-  --text-secondary:  light-dark(#52514e, #c3c2b7);
+  color-scheme: light;
+  --page:            #f9f9f7;
+  --surface-1:       #fcfcfb;
+  --text-primary:    #0b0b0b;
+  --text-secondary:  #52514e;
   --text-muted:      #898781;
-  --gridline:        light-dark(#e1e0d9, #2c2c2a);
-  --baseline:        light-dark(#c3c2b7, #383835);
-  --border:          light-dark(rgba(11, 11, 11, 0.10), rgba(255, 255, 255, 0.10));
-  --series-nominal:  light-dark(#2a78d6, #3987e5);   /* categorical slot 1 — blue */
-  --series-real:     light-dark(#1baf7a, #199e70);   /* categorical slot 2 — aqua */
-  --status-good:     light-dark(#006300, #0ca30c);   /* success as text */
+  --gridline:        #e1e0d9;
+  --baseline:        #c3c2b7;
+  --border:          rgba(11, 11, 11, 0.10);
+  --series-nominal:  #2a78d6;   /* categorical slot 1 — blue  */
+  --series-real:     #1baf7a;   /* categorical slot 2 — aqua  */
+  --status-good:     #006300;   /* success as text */
   --status-critical: #d03b3b;
-  --focus-ring:      light-dark(#2a78d6, #3987e5);
+  --focus-ring:      #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page:            #0d0d0d;
+    --surface-1:       #1a1a19;
+    --text-primary:    #ffffff;
+    --text-secondary:  #c3c2b7;
+    --gridline:        #2c2c2a;
+    --baseline:        #383835;
+    --border:          rgba(255, 255, 255, 0.10);
+    --series-nominal:  #3987e5;
+    --series-real:     #199e70;
+    --status-good:     #0ca30c;
+    --focus-ring:      #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:            #0d0d0d;
+  --surface-1:       #1a1a19;
+  --text-primary:    #ffffff;
+  --text-secondary:  #c3c2b7;
+  --gridline:        #2c2c2a;
+  --baseline:        #383835;
+  --border:          rgba(255, 255, 255, 0.10);
+  --series-nominal:  #3987e5;
+  --series-real:     #199e70;
+  --status-good:     #0ca30c;
+  --focus-ring:      #3987e5;
 }
 
 /* ---------- base ---------- */
@@ -40,7 +69,21 @@ button { font: inherit; color: inherit; }
   display: flex; justify-content: space-between; align-items: flex-start;
   gap: 12px; flex-wrap: wrap;
 }
-.theme-toggle { background: var(--surface-1); }
+.theme-toggle {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex: none;
+}
+.theme-toggle:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.theme-toggle svg[hidden] { display: none; }
 .tagline { color: var(--text-secondary); margin: 4px 0 0; }
 
 .card {
