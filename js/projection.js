@@ -91,6 +91,19 @@ export function project(p) {
   let expenses = num(p.annualExpenses, 0);
   const retirementSpendToday = num(p.annualRetirementSpend, expenses);
 
+  // One-off life events (wedding, home down payment…): amounts in today's
+  // money, spent from liquid savings in the year the given age is reached.
+  const eventsByAge = new Map();
+  if (Array.isArray(p.events)) {
+    for (const e of p.events) {
+      const eventAge = num(e.age, NaN);
+      const amount = num(e.amount, 0);
+      if (Number.isFinite(eventAge) && amount) {
+        eventsByAge.set(eventAge, (eventsByAge.get(eventAge) || 0) + amount);
+      }
+    }
+  }
+
   const taxOn = !!p.includeTax;
   const cpfOn = !!(p.cpf && p.cpf.enabled);
   let oa = cpfOn ? num(p.cpf.oa, 0) : 0;
@@ -156,6 +169,7 @@ export function project(p) {
         // CPF LIFE payouts are tax-exempt; withdrawals aren't income
         cashFlow = annualPayout - retirementSpendToday * deflator;
       }
+      cashFlow -= (eventsByAge.get(age) || 0) * deflator;
 
       const liquidBefore = liquid;
       liquid += growth + cashFlow;

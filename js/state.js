@@ -38,6 +38,7 @@ export const DEFAULT_STATE = {
   spendCategories: [],            // optional: [{ id, name, budget, archived }]
   spendLog: {},                   // "YYYY-MM" -> { byCategory: { id: n }, other: n }
   useActualsForForecast: false,
+  events: [],                     // optional: [{ name, age, amount }] in today's money
   lastBackupAt: null,             // ISO string, set when a backup is exported
 };
 
@@ -79,6 +80,7 @@ export function mergeSaved(saved) {
   merged.spendCategories = sanitiseCategories(saved.spendCategories);
   merged.spendLog = sanitiseLog(saved.spendLog);
   merged.useActualsForForecast = Boolean(saved.useActualsForForecast);
+  merged.events = sanitiseEvents(saved.events);
   merged.lastBackupAt = sanitiseTimestamp(saved.lastBackupAt);
   if ("accounts" in (saved || {})) merged.accounts = sanitiseAccounts(saved.accounts);
   return merged;
@@ -114,6 +116,25 @@ export function sanitiseCategories(list) {
     if (c.archived) cat.archived = true;
     return cat;
   });
+}
+
+/**
+ * Events reach the projection engine, which ignores a non-finite age but would
+ * happily arithmetic on a string amount. Rows are also rendered and mutated in
+ * place, so the shape has to survive an untrusted import.
+ *
+ * An unusable age becomes null rather than 0 — the row stays editable and the
+ * engine skips it, where 0 would claim to be a real age nobody reaches.
+ */
+export function sanitiseEvents(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((e) => e && typeof e === "object")
+    .map((e) => ({
+      name: String(e.name ?? ""),
+      age: Number.isFinite(e.age) ? e.age : null,
+      amount: Number.isFinite(e.amount) && e.amount >= 0 ? e.amount : 0,
+    }));
 }
 
 export function sanitiseLog(log) {
