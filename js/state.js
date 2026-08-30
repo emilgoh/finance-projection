@@ -38,6 +38,7 @@ export const DEFAULT_STATE = {
   spendCategories: [],            // optional: [{ id, name, budget, archived }]
   spendLog: {},                   // "YYYY-MM" -> { byCategory: { id: n }, other: n }
   useActualsForForecast: false,
+  lastBackupAt: null,             // ISO string, set when a backup is exported
 };
 
 export const ACCOUNT_TYPES = ["cash", "investments", "retirement", "property", "other"];
@@ -78,6 +79,7 @@ export function mergeSaved(saved) {
   merged.spendCategories = sanitiseCategories(saved.spendCategories);
   merged.spendLog = sanitiseLog(saved.spendLog);
   merged.useActualsForForecast = Boolean(saved.useActualsForForecast);
+  merged.lastBackupAt = sanitiseTimestamp(saved.lastBackupAt);
   if ("accounts" in (saved || {})) merged.accounts = sanitiseAccounts(saved.accounts);
   return merged;
 }
@@ -130,4 +132,51 @@ export function sanitiseLog(log) {
     if (isLogged({ [key]: clean }, key)) out[key] = clean;
   }
   return out;
+}
+
+/**
+ * Kept as an ISO string so an unparseable one degrades to "never backed up"
+ * rather than rendering "Invalid Date" in the footer.
+ */
+export function sanitiseTimestamp(value) {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return null;
+  return value;
+}
+
+/* ---------- backup freshness ---------- */
+
+/** A backup older than this is worth nagging about. */
+export const BACKUP_STALE_DAYS = 30;
+
+const DAY_MS = 86400000;
+
+/**
+ * Everything lives in one browser's local storage, so a cleared site is a
+ * cleared history. This drives the footer line that says how long it has been.
+ *
+ * `hasData` keeps a fresh install quiet: with nothing logged there is nothing
+ * to lose yet, so "no backup" is a fact rather than a warning.
+ */
+export function backupHint(lastBackupAt, { hasData = false, now = Date.now() } = {}) {
+  const at = typeof lastBackupAt === "string" ? Date.parse(lastBackupAt) : NaN;
+  if (!Number.isFinite(at)) {
+    return hasData
+      ? { label: "Never backed up.", stale: true }
+      : { label: "No backup yet.", stale: false };
+  }
+
+  // A clock that moved backwards (timezone change, an imported future date)
+  // should read as "just now", never as a negative age.
+  const days = Math.max(0, Math.floor((now - at) / DAY_MS));
+  return { label: `Last backup: ${describeAge(days)}.`, stale: days >= BACKUP_STALE_DAYS };
+}
+
+function describeAge(days) {
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  if (days < 365) return `${Math.round(days / 30)} months ago`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? "over a year ago" : `over ${years} years ago`;
 }

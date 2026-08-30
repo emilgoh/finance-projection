@@ -7,7 +7,7 @@ import {
 } from "./expenses.js";
 import {
   DEFAULT_STATE, ACCOUNT_TYPES,
-  loadState, writeState, clearState, mergeSaved, newId,
+  loadState, writeState, clearState, mergeSaved, newId, backupHint, sanitiseTimestamp,
 } from "./state.js";
 
 let state = loadState(localStorage);
@@ -760,6 +760,12 @@ document.getElementById("export-data").addEventListener("click", () => {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
+
+  // Stamped after the payload is built, so the file records the backup before
+  // it rather than its own timestamp twice.
+  state.lastBackupAt = payload.exportedAt;
+  saveState();
+  renderBackupStatus();
 });
 
 const importFile = document.getElementById("import-file");
@@ -782,10 +788,23 @@ importFile.addEventListener("change", async () => {
   }
   if (!confirm("Replace everything currently saved with this backup?")) return;
   state = mergeSaved(saved); // same sanitising funnel as localStorage
+  // What is now on screen came from that file, so the file's own export time
+  // is when this data was last backed up — not "now".
+  state.lastBackupAt = sanitiseTimestamp(payload.exportedAt) ?? state.lastBackupAt;
   selectedMonth = monthKey(new Date());
   saveState();
   rerenderAll();
 });
+
+function renderBackupStatus() {
+  const el = document.getElementById("backup-status");
+  // A default install has nothing to lose yet, so only nag once something
+  // has actually been entered.
+  const hasData = loggedMonths(state.spendLog).length > 0 || state.spendCategories.length > 0;
+  const { label, stale } = backupHint(state.lastBackupAt, { hasData });
+  el.textContent = label;
+  el.classList.toggle("backup-status-stale", stale);
+}
 
 function rerenderAll() {
   applyTheme();
@@ -793,6 +812,7 @@ function rerenderAll() {
   renderAccounts();
   renderBudget();
   renderLog();
+  renderBackupStatus();
   recompute();
 }
 
@@ -824,4 +844,5 @@ bindViewToggle();
 renderAccounts();
 renderBudget();
 renderLog();
+renderBackupStatus();
 recompute();
