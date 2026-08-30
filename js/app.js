@@ -1,5 +1,10 @@
 import { project, CPF, TAX } from "./projection.js";
 import { renderChart } from "./chart.js";
+import {
+  OTHER_ID, MONTH_RE, monthKey, addMonths, formatMonth,
+  activeCategories, categoryBudgetTotal,
+  isLogged, loggedMonths, monthVariance, effectiveExpenses,
+} from "./expenses.js";
 
 const STORAGE_KEY = "wealth-projection-v3";
 const LEGACY_STORAGE_KEY = "wealth-projection-v2";
@@ -28,12 +33,18 @@ const DEFAULT_STATE = {
     { name: "Brokerage", type: "investments", value: 20000 },
     { name: "SRS", type: "retirement", value: 10000 },
   ],
+  spendCategories: [],            // optional: [{ id, name, budget, archived }]
+  spendLog: {},                   // "YYYY-MM" -> { byCategory: { id: n }, other: n }
+  useActualsForForecast: false,
 };
 
 const ACCOUNT_TYPES = ["cash", "investments", "retirement", "property", "other"];
 
 let state = loadState();
 let disposeChart = () => {};
+// Which month the log is showing. Deliberately not persisted: opening the app in
+// December should show December, not wherever you last browsed to.
+let selectedMonth = monthKey(new Date());
 
 /* ---------- persistence ---------- */
 function loadState() {
@@ -57,7 +68,63 @@ function mergeSaved(saved) {
   const merged = { ...structuredClone(DEFAULT_STATE), ...saved };
   merged.cpf = { ...structuredClone(DEFAULT_STATE.cpf), ...(saved.cpf || {}) };
   delete merged.cpf.grossMonthlySalary;
+  // Replaced wholesale, then sanitised — deep-merging would resurrect deleted
+  // categories, and an imported file is no longer a trusted source.
+  merged.spendCategories = sanitiseCategories(saved.spendCategories);
+  merged.spendLog = sanitiseLog(saved.spendLog);
+  merged.useActualsForForecast = Boolean(saved.useActualsForForecast);
+  if ("accounts" in (saved || {})) merged.accounts = sanitiseAccounts(saved.accounts);
   return merged;
+}
+
+/**
+ * Accounts are rendered and mutated in place, so anything that isn't a list of
+ * plain objects would throw mid-render — and an imported file is not trusted.
+ */
+function sanitiseAccounts(list) {
+  if (!Array.isArray(list)) return structuredClone(DEFAULT_STATE.accounts);
+  return list
+    .filter((a) => a && typeof a === "object")
+    .map((a) => ({
+      name: String(a.name ?? ""),
+      type: ACCOUNT_TYPES.includes(a.type) ? a.type : "other",
+      value: Number.isFinite(a.value) ? a.value : 0,
+    }));
+}
+
+function newId() {
+  return crypto.randomUUID?.() ?? `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function sanitiseCategories(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  return list.filter((c) => c && typeof c === "object").map((c) => {
+    let id = typeof c.id === "string" && c.id && !seen.has(c.id) ? c.id : newId();
+    seen.add(id);
+    const cat = { id, name: String(c.name ?? "") };
+    if (Number.isFinite(c.budget)) cat.budget = c.budget;
+    if (c.archived) cat.archived = true;
+    return cat;
+  });
+}
+
+function sanitiseLog(log) {
+  if (!log || typeof log !== "object") return {};
+  const out = {};
+  for (const key of Object.keys(log)) {
+    if (!MONTH_RE.test(key)) continue;
+    const entry = log[key];
+    if (!entry || typeof entry !== "object") continue;
+    const clean = { byCategory: {} };
+    const by = entry.byCategory && typeof entry.byCategory === "object" ? entry.byCategory : {};
+    for (const id of Object.keys(by)) {
+      if (Number.isFinite(by[id]) && by[id] >= 0) clean.byCategory[id] = by[id];
+    }
+    if (Number.isFinite(entry.other) && entry.other >= 0) clean.other = entry.other;
+    if (isLogged({ [key]: clean }, key)) out[key] = clean;
+  }
+  return out;
 }
 
 function saveState() {
@@ -107,6 +174,13 @@ function bindPlanInputs() {
     saveState();
     recompute();
   });
+  const actualsCheck = document.getElementById("in-useActualsForForecast");
+  actualsCheck.checked = state.useActualsForForecast;
+  actualsCheck.addEventListener("change", () => {
+    state.useActualsForForecast = actualsCheck.checked;
+    saveState();
+    recompute();
+  });
   const currency = document.getElementById("in-currency");
   currency.value = state.currency;
   if (currency.value !== state.currency) currency.value = "S$"; // unknown saved symbol
@@ -115,6 +189,8 @@ function bindPlanInputs() {
     saveState();
     recompute();
     renderAccounts();
+    renderBudget();
+    renderLog();
   });
 }
 
@@ -242,15 +318,297 @@ function updateAccountsTotal() {
   updateCpfTotal();
 }
 
+
+/* ---------- spending categories ---------- */
+function renderBudget() {
+  const list = document.getElementById("budget-list");
+  list.textContent = "";
+  for (const cat of activeCategories(state.spendCategories)) {
+    const row = document.createElement("div");
+    row.className = "budget-row";
+
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = cat.name;
+    name.placeholder = "Category name";
+    name.setAttribute("aria-label", "Category name");
+    name.addEventListener("input", () => {
+      cat.name = name.value;
+      saveState();
+      renderLog(); // the log labels rows by category name; keep them in step
+    });
+
+    const budget = document.createElement("input");
+    budget.type = "number";
+    budget.min = "0";
+    budget.step = "50";
+    budget.value = Number.isFinite(cat.budget) ? cat.budget : "";
+    budget.placeholder = "Budget";
+    budget.setAttribute("aria-label", `Monthly budget in ${state.currency}`);
+    budget.addEventListener("input", () => {
+      const v = parseFloat(budget.value);
+      if (Number.isFinite(v)) cat.budget = v;
+      else delete cat.budget;
+      saveState();
+      updateBudgetTotal();
+      renderLog();
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "account-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove ${cat.name || "category"}`);
+    remove.addEventListener("click", () => removeCategory(cat));
+
+    row.append(name, budget, remove);
+    list.append(row);
+  }
+  updateBudgetTotal();
+}
+
+/**
+ * Categories with logged history are archived rather than deleted, so past
+ * months keep their names and their totals never shift under the user.
+ */
+function removeCategory(cat) {
+  const logged = Object.values(state.spendLog).some((e) => Number.isFinite(e.byCategory?.[cat.id]));
+  if (logged) {
+    const label = cat.name || "this category";
+    if (!confirm(`${label} has spending logged against it. Remove it from the list but keep that history?`)) return;
+    cat.archived = true;
+  } else {
+    const i = state.spendCategories.indexOf(cat);
+    if (i >= 0) state.spendCategories.splice(i, 1);
+  }
+  saveState();
+  renderBudget();
+  renderLog();
+}
+
+function updateBudgetTotal() {
+  const line = document.getElementById("budget-total-line");
+  const cats = activeCategories(state.spendCategories);
+  if (cats.length === 0) {
+    line.textContent = "";
+    return;
+  }
+  const total = categoryBudgetTotal(state.spendCategories);
+  let text = `Categories add up to ${fmtFull(total)} / month`;
+  // The two figures are allowed to disagree — the plan figure is what forecasts.
+  if (Math.abs(total - state.monthlyExpenses) >= 1) text += ` · your plan says ${fmtFull(state.monthlyExpenses)}`;
+  line.textContent = text;
+}
+
+/* ---------- monthly spending log ---------- */
+function entryFor(key) {
+  if (!state.spendLog[key]) state.spendLog[key] = { byCategory: {} };
+  const entry = state.spendLog[key];
+  if (!entry.byCategory) entry.byCategory = {};
+  return entry;
+}
+
+/** Drop a month once nothing is left in it, so "logged" stays honest. */
+function pruneMonth(key) {
+  if (!isLogged(state.spendLog, key)) delete state.spendLog[key];
+}
+
+/**
+ * How far back the log can be browsed: three years, or further if an imported
+ * backup holds older months — those still feed the average, so they must stay
+ * reachable.
+ */
+function earliestMonth() {
+  const floor = addMonths(monthKey(new Date()), -36);
+  const oldest = loggedMonths(state.spendLog)[0];
+  return oldest && oldest < floor ? oldest : floor;
+}
+
+// Variance cells are refreshed in place as amounts are typed, so the inputs keep
+// their focus and caret instead of being rebuilt on every keystroke.
+let logVarianceCells = new Map();
+
+function renderLog() {
+  const thisMonth = monthKey(new Date());
+  document.getElementById("log-month-label").textContent = formatMonth(selectedMonth);
+  document.getElementById("log-next").disabled = selectedMonth >= thisMonth;
+  document.getElementById("log-prev").disabled = selectedMonth <= earliestMonth();
+  document.getElementById("log-today").hidden = selectedMonth === thisMonth;
+
+  const { rows } = monthVariance(state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
+  const soloOther = rows.length === 1 && rows[0].id === OTHER_ID;
+  const list = document.getElementById("log-list");
+  list.textContent = "";
+  logVarianceCells = new Map();
+  if (!soloOther) list.append(logHeadRow());
+
+  for (const r of rows) {
+    const row = document.createElement("div");
+    row.className = "log-row";
+
+    const name = document.createElement("span");
+    name.className = "log-name";
+    name.textContent = soloOther ? "Total spent" : r.name;
+    if (r.archived) {
+      const tag = document.createElement("small");
+      tag.textContent = " (removed)";
+      name.append(tag);
+    }
+
+    const budget = document.createElement("span");
+    budget.className = "log-budget";
+    budget.textContent = r.budget === null ? "—" : fmtFull(r.budget);
+
+    const spent = document.createElement("input");
+    spent.type = "number";
+    spent.min = "0";
+    spent.step = "10";
+    spent.value = r.actual === null ? "" : r.actual;
+    spent.placeholder = "0";
+    spent.setAttribute(
+      "aria-label",
+      soloOther
+        ? `Total spent in ${formatMonth(selectedMonth)}`
+        : `Spent on ${r.name} in ${formatMonth(selectedMonth)}`,
+    );
+    spent.addEventListener("input", () => {
+      const raw = parseFloat(spent.value);
+      // Negatives are dropped on reload by sanitiseLog, so never accept one here
+      // — otherwise the totals would quietly change on the next page load.
+      const v = Number.isFinite(raw) && raw >= 0 ? raw : null;
+      const entry = entryFor(selectedMonth);
+      if (r.id === OTHER_ID) {
+        if (v !== null) entry.other = v;
+        else delete entry.other;
+      } else if (v !== null) {
+        entry.byCategory[r.id] = v;
+      } else {
+        delete entry.byCategory[r.id];
+      }
+      pruneMonth(selectedMonth);
+      saveState();
+      recompute(); // re-renders the summary, and the forecast if it is on actuals
+    });
+
+    const variance = document.createElement("span");
+    applyVariance(variance, r.variance, r.budget);
+    logVarianceCells.set(r.id, variance);
+
+    if (soloOther) row.append(name, spent);
+    else row.append(name, budget, spent, variance);
+    row.classList.toggle("log-row-solo", soloOther);
+    list.append(row);
+  }
+  renderLogSummary();
+}
+
+function refreshVariances(rows) {
+  if (logVarianceCells.size === 0) return;
+  for (const r of rows) {
+    const cell = logVarianceCells.get(r.id);
+    if (cell) applyVariance(cell, r.variance, r.budget);
+  }
+}
+
+function logHeadRow() {
+  const head = document.createElement("div");
+  head.className = "log-row log-head";
+  for (const label of ["Category", "Budget", `Spent in ${formatMonth(selectedMonth).split(" ")[0]}`, "vs budget"]) {
+    const cell = document.createElement("span");
+    cell.textContent = label;
+    head.append(cell);
+  }
+  return head;
+}
+
+/** Sign carries the meaning, so colour is never the only channel. */
+function applyVariance(el, variance, budget) {
+  el.className = "log-variance";
+  if (variance === null) {
+    el.textContent = "—";
+    return;
+  }
+  const tolerance = Math.max(1, Math.abs(num(budget, 0)) * 0.02);
+  if (Math.abs(variance) < tolerance) {
+    el.textContent = "on budget";
+  } else if (variance > 0) {
+    el.textContent = `+${fmtFull(variance)}`;
+    el.classList.add("tile-critical");
+  } else {
+    el.textContent = `−${fmtFull(Math.abs(variance))}`;
+    el.classList.add("tile-good");
+  }
+}
+
+function renderLogSummary() {
+  const el = document.getElementById("log-summary");
+  const { rows, total, logged } =
+    monthVariance(state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
+  refreshVariances(rows);
+  if (!logged) {
+    el.textContent = `Nothing logged for ${formatMonth(selectedMonth)} yet.`;
+    el.className = "log-summary";
+    return;
+  }
+  const diff = total.variance;
+  const tolerance = Math.max(1, total.budget * 0.02);
+  let tail = "right on budget";
+  let tone = "";
+  if (diff > tolerance) { tail = `${fmtFull(diff)} over`; tone = "tile-critical"; }
+  else if (diff < -tolerance) { tail = `${fmtFull(-diff)} under`; tone = "tile-good"; }
+  el.textContent = `Logged ${fmtFull(total.actual)} of ${fmtFull(total.budget)} budgeted — ${tail}.`;
+  el.className = `log-summary ${tone}`.trim();
+}
+
+/** The month the average runs up to: the last completed one. */
+function lastCompletedMonth() {
+  return addMonths(monthKey(new Date()), -1);
+}
+
+function currentExpenses() {
+  return effectiveExpenses({
+    spendLog: state.spendLog,
+    monthlyExpenses: state.monthlyExpenses,
+    useActuals: state.useActualsForForecast,
+    endMonth: lastCompletedMonth(),
+  });
+}
+
+function updateForecastHint() {
+  const hint = document.getElementById("forecast-hint");
+  const { monthly, basis, monthsUsed } = currentExpenses();
+  if (basis === "actuals") {
+    const months = monthsUsed === 1 ? "1 completed month" : `${monthsUsed} completed months`;
+    hint.textContent = `Forecasting on ${fmtFull(monthly)}/month — your average across ${months}. Retirement spending is unaffected.`;
+  } else if (state.useActualsForForecast) {
+    hint.textContent = `Nothing logged for a completed month yet, so the forecast still uses your plan figure of ${fmtFull(monthly)}/month.`;
+  } else {
+    hint.textContent = `Forecasting on your plan figure of ${fmtFull(monthly)}/month.`;
+  }
+}
+
+function stepMonth(delta) {
+  const next = addMonths(selectedMonth, delta);
+  if (next > monthKey(new Date())) return;
+  selectedMonth = next;
+  renderLog();
+}
+
+function num(v, fallback) {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return Number.isFinite(n) ? n : fallback;
+}
+
 /* ---------- results ---------- */
 function recompute() {
   const result = project({
     currentAge: state.currentAge,
     retirementAge: state.retirementAge,
     endAge: state.endAge,
+    startYear: new Date().getFullYear(),
     startNetWorth: accountsTotal(),
     annualGrossIncome: state.monthlyGrossIncome * 12,
-    annualExpenses: state.monthlyExpenses * 12,
+    annualExpenses: currentExpenses().annual,
     annualRetirementSpend: state.monthlyRetirementSpend * 12,
     returnRate: state.returnRate,
     inflationRate: state.inflationRate,
@@ -260,6 +618,9 @@ function recompute() {
   });
 
   updateIncomeHint();
+  updateForecastHint();
+  updateBudgetTotal(); // the plan figure it quotes may have just changed
+  renderLogSummary();
   renderHero(result);
   renderTiles(result);
   disposeChart();
@@ -467,20 +828,90 @@ document.getElementById("add-account").addEventListener("click", () => {
   rows[rows.length - 1]?.querySelector("input")?.focus();
 });
 
+document.getElementById("add-category").addEventListener("click", () => {
+  state.spendCategories.push({ id: newId(), name: "" });
+  saveState();
+  renderBudget();
+  renderLog();
+  const rows = document.querySelectorAll("#budget-list .budget-row");
+  rows[rows.length - 1]?.querySelector("input")?.focus();
+});
+
+document.getElementById("log-prev").addEventListener("click", () => stepMonth(-1));
+document.getElementById("log-next").addEventListener("click", () => stepMonth(1));
+document.getElementById("log-today").addEventListener("click", () => {
+  selectedMonth = monthKey(new Date());
+  renderLog();
+});
+
 document.getElementById("reset-data").addEventListener("click", () => {
   if (!confirm("Reset all data to the defaults?")) return;
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(LEGACY_STORAGE_KEY); // else the old data loads again on reload
   state = structuredClone(DEFAULT_STATE);
-  bindPlanInputsValuesOnly();
-  applyTheme();
-  renderAccounts();
-  recompute();
+  selectedMonth = monthKey(new Date());
+  rerenderAll();
 });
 
-function bindPlanInputsValuesOnly() {
+/* ---------- backup files ---------- */
+document.getElementById("export-data").addEventListener("click", () => {
+  const payload = {
+    app: "wealth-projection",
+    version: 3,
+    exportedAt: new Date().toISOString(),
+    state,
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `wealth-projection-${new Date().toISOString().slice(0, 10)}.json`;
+  // Firefox only downloads from an anchor in the document, and cancels the
+  // download if the object URL is revoked before it has been read.
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+});
+
+const importFile = document.getElementById("import-file");
+document.getElementById("import-data").addEventListener("click", () => importFile.click());
+importFile.addEventListener("change", async () => {
+  const file = importFile.files?.[0];
+  importFile.value = ""; // so re-importing the same file still fires "change"
+  if (!file) return;
+  let payload;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch {
+    alert("That file isn't valid JSON.");
+    return;
+  }
+  const saved = payload?.app === "wealth-projection" ? payload.state : null;
+  if (!saved || typeof saved !== "object") {
+    alert("That file isn't a Wealth Projection backup.");
+    return;
+  }
+  if (!confirm("Replace everything currently saved with this backup?")) return;
+  state = mergeSaved(saved); // same sanitising funnel as localStorage
+  selectedMonth = monthKey(new Date());
+  saveState();
+  rerenderAll();
+});
+
+function rerenderAll() {
+  applyTheme();
+  syncInputsFromState();
+  renderAccounts();
+  renderBudget();
+  renderLog();
+  recompute();
+}
+
+function syncInputsFromState() {
   for (const key of PLAN_FIELDS) document.getElementById(`in-${key}`).value = state[key];
   document.getElementById("in-currency").value = state.currency;
   document.getElementById("in-includeTax").checked = state.includeTax;
+  document.getElementById("in-useActualsForForecast").checked = state.useActualsForForecast;
   document.getElementById("in-cpfEnabled").checked = state.cpf.enabled;
   for (const [id, key] of CPF_FIELDS) document.getElementById(id).value = state.cpf[key];
   syncCpfUI();
@@ -502,4 +933,6 @@ bindPlanInputs();
 bindCpfInputs();
 bindViewToggle();
 renderAccounts();
+renderBudget();
+renderLog();
 recompute();

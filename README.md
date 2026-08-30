@@ -19,13 +19,31 @@ leaves your machine.
 It's a static site — no build step, no dependencies. Serve the folder and open it:
 
 ```sh
-python3 -m http.server 8000
+./serve.py            # or: .venv/bin/python serve.py
 # then open http://localhost:8000
 ```
 
-(Any static file server works; it also deploys as-is to GitHub Pages or similar.
-A server is needed because the JavaScript uses ES modules, which browsers block
-on `file://` URLs.)
+(A server is needed because the JavaScript uses ES modules, which browsers block
+on `file://` URLs. It also deploys as-is to GitHub Pages or similar.)
+
+`serve.py` is `python3 -m http.server` with caching switched off. That matters:
+the plain module sends no cache headers, so browsers fall back to *heuristic*
+caching and keep serving an edited `js/app.js` from disk for days without ever
+revalidating. The page then renders new markup against old JavaScript, which
+looks exactly like a broken feature. If you have already been bitten, one hard
+reload (<kbd>Cmd/Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>) clears the stale
+entry.
+
+To work on it you also need Node, for the tests. `setup.sh` provisions both
+tools without touching anything outside the project — a Python virtual
+environment in `.venv/`, and, only if the system Node is missing or older than
+v20, a project-local Node in `.tools/node/`:
+
+```sh
+./setup.sh
+```
+
+It finishes by running the test suite. `rm -rf .venv .tools` undoes all of it.
 
 ## What it shows
 
@@ -38,6 +56,16 @@ on `file://` URLs.)
   with a retirement marker and a crosshair tooltip (mouse or arrow keys).
 - **Light & dark mode** — follows your system by default; the sun/moon button
   in the top-right corner switches theme, and the choice is remembered.
+- **Monthly spending log** — log what you actually spent each month, optionally
+  split by category, and see it against your budget. Overspend shows as `+`, an
+  underspend as `−`.
+- **Forecast from your actuals** — a checkbox swaps the projection's spending
+  assumption from the figure in your plan to the average of every month you have
+  logged. Until a completed month exists it falls back to the plan figure and
+  says so. Retirement spending is a separate, forward-looking assumption and is
+  never affected.
+- **Backups** — export everything to a JSON file and import it back, to move
+  between browsers or keep a copy.
 - **Table view** — the same projection as year-by-year figures: net worth,
   today's-money value, CPF balance, amount saved or withdrawn, and investment
   growth.
@@ -107,13 +135,17 @@ CPF parameters (in `js/projection.js`) are based on:
 index.html            page structure
 styles.css            theme (light/dark), layout, chart chrome
 js/projection.js      pure projection engine (no DOM)
+js/expenses.js        pure month/variance/average helpers (no DOM)
 js/chart.js           interactive SVG chart renderer
-js/app.js             state, persistence, inputs, tiles, table
-tests/                engine tests
+js/app.js             state, persistence, inputs, spending log, tiles, table
+tests/                engine and spending-log tests
+serve.py              dev server with caching disabled
+setup.sh              provisions the local toolchain (venv + Node)
+docs/TODO.md          known gaps, deferred work, and decisions made on purpose
 ```
 
 ## Tests
 
 ```sh
-node --test tests/projection.test.mjs
+node --test                      # or .tools/node/bin/node --test after setup.sh
 ```
