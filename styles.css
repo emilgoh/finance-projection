@@ -381,3 +381,8 @@ input:focus-visible, select:focus-visible, button:focus-visible, .chart-region:f
   font-size: 0.8rem;
 }
 .site-footer p { margin: 6px 0; }
+
+/* Reuses the existing status hue rather than adding a token: a stale backup is
+   the one footer line that should stop reading as boilerplate. */
+.backup-status:empty { display: none; }
+.backup-status-stale { color: var(--status-critical); }

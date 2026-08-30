@@ -4,6 +4,7 @@ import {
   STORAGE_KEY, LEGACY_STORAGE_KEY, DEFAULT_STATE, ACCOUNT_TYPES,
   loadState, writeState, clearState, mergeSaved,
   sanitiseAccounts, sanitiseCategories, sanitiseLog, newId,
+  sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS,
 } from "../js/state.js";
 
 /** Minimal stand-in for localStorage: same three methods, plain object inside. */
@@ -255,4 +256,70 @@ test("sanitiseLog: byCategory always exists on a surviving month", () => {
   // renderLog() reads entry.byCategory directly; a missing one would throw.
   const out = sanitiseLog({ "2026-10": { other: 40 } });
   assert.deepEqual(out["2026-10"], { byCategory: {}, other: 40 });
+});
+
+/* ---------- backup freshness ---------- */
+
+const DAY = 86400000;
+const NOW = Date.parse("2026-08-30T12:00:00.000Z");
+const daysAgo = (n) => new Date(NOW - n * DAY).toISOString();
+
+test("backupHint: a fresh install is told, not warned", () => {
+  assert.deepEqual(backupHint(null, { hasData: false, now: NOW }),
+    { label: "No backup yet.", stale: false });
+});
+
+test("backupHint: never backing up is stale once there is data to lose", () => {
+  const hint = backupHint(null, { hasData: true, now: NOW });
+  assert.equal(hint.stale, true);
+  assert.equal(hint.label, "Never backed up.");
+});
+
+test("backupHint: ages read in the largest useful unit", () => {
+  const label = (n) => backupHint(daysAgo(n), { now: NOW }).label;
+  assert.equal(label(0), "Last backup: today.");
+  assert.equal(label(1), "Last backup: yesterday.");
+  assert.equal(label(5), "Last backup: 5 days ago.");
+  assert.equal(label(21), "Last backup: 3 weeks ago.");
+  assert.equal(label(90), "Last backup: 3 months ago.");
+  assert.equal(label(400), "Last backup: over a year ago.");
+  assert.equal(label(900), "Last backup: over 2 years ago.");
+});
+
+test(`backupHint: stale at exactly ${BACKUP_STALE_DAYS} days, not before`, () => {
+  assert.equal(backupHint(daysAgo(BACKUP_STALE_DAYS - 1), { now: NOW }).stale, false);
+  assert.equal(backupHint(daysAgo(BACKUP_STALE_DAYS), { now: NOW }).stale, true);
+});
+
+test("backupHint: staleness does not depend on hasData once a backup exists", () => {
+  for (const hasData of [true, false]) {
+    assert.equal(backupHint(daysAgo(60), { hasData, now: NOW }).stale, true);
+  }
+});
+
+test("backupHint: a future timestamp reads as today rather than a negative age", () => {
+  // A timezone change or an imported file with a skewed clock.
+  const hint = backupHint(new Date(NOW + 3 * DAY).toISOString(), { now: NOW });
+  assert.deepEqual(hint, { label: "Last backup: today.", stale: false });
+});
+
+test("backupHint: an unparseable timestamp degrades to never, not Invalid Date", () => {
+  for (const bad of ["not a date", "", 12345, {}, undefined]) {
+    assert.equal(backupHint(bad, { hasData: true, now: NOW }).label, "Never backed up.");
+  }
+});
+
+test("sanitiseTimestamp keeps valid ISO strings and drops everything else", () => {
+  const iso = "2026-08-30T12:00:00.000Z";
+  assert.equal(sanitiseTimestamp(iso), iso);
+  for (const bad of [null, undefined, 0, Date.now(), "nope", new Date(), {}]) {
+    assert.equal(sanitiseTimestamp(bad), null);
+  }
+});
+
+test("mergeSaved: a garbage lastBackupAt cannot render as Invalid Date", () => {
+  assert.equal(mergeSaved({ lastBackupAt: "nope" }).lastBackupAt, null);
+  assert.equal(mergeSaved({ lastBackupAt: 1756555555555 }).lastBackupAt, null);
+  const iso = "2026-01-02T03:04:05.000Z";
+  assert.equal(mergeSaved({ lastBackupAt: iso }).lastBackupAt, iso);
 });
