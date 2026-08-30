@@ -7,10 +7,13 @@
   <meta name="description" content="Track what you own today and project your wealth into the future.">
   <script>
     // apply the saved theme before first paint to avoid a flash
-    try {
-      const theme = JSON.parse(localStorage.getItem("wealth-projection-v2")).theme;
-      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-    } catch { /* no saved state */ }
+    for (const key of ["wealth-projection-v3", "wealth-projection-v2"]) {
+      try {
+        const theme = JSON.parse(localStorage.getItem(key)).theme;
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+        if (theme) break; // "system" — stop here, don't fall through to the older key
+      } catch { /* no saved state under this key */ }
+    }
   </script>
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E">
@@ -107,6 +110,17 @@
         </div>
       </div>
 
+      <div class="card budget-card">
+        <h2>Spending categories <small class="h2-hint">(optional)</small></h2>
+        <p class="card-hint">Split your spending so you can see where it drifts.
+           Leave this empty to just log one total each month.</p>
+        <div id="budget-list" class="budget-list"></div>
+        <div class="accounts-footer">
+          <button type="button" id="add-category" class="btn">+ Add category</button>
+          <p class="accounts-total" id="budget-total-line"></p>
+        </div>
+      </div>
+
       <div class="card cpf-card">
         <div class="cpf-header">
           <h2>CPF <small class="h2-hint">(Central Provident Fund)</small></h2>
@@ -137,6 +151,28 @@
           plan estimate) turning OA+SA — up to the Enhanced Retirement Sum — into
           lifelong payouts from age 65.
         </p>
+      </div>
+    </section>
+
+    <section class="tracker" aria-label="Monthly spending log">
+      <div class="card log-card">
+        <div class="log-header">
+          <div class="month-nav">
+            <button type="button" id="log-prev" class="btn month-step" aria-label="Previous month">‹</button>
+            <h2 id="log-month-label" aria-live="polite"></h2>
+            <button type="button" id="log-next" class="btn month-step" aria-label="Next month">›</button>
+          </div>
+          <button type="button" id="log-today" class="btn-link">This month</button>
+        </div>
+        <div id="log-list" class="log-list"></div>
+        <p class="log-summary" id="log-summary"></p>
+        <div class="log-footer">
+          <label class="check-field">
+            <input type="checkbox" id="in-useActualsForForecast">
+            Use my logged spending as the forecast basis
+          </label>
+          <p class="forecast-hint" id="forecast-hint"></p>
+        </div>
       </div>
     </section>
 
@@ -179,7 +215,10 @@
        earned-income reliefs; CPF LIFE payouts and investment gains are untaxed.
        This is a rough model, not financial advice.</p>
     <p>Your data never leaves this browser — it is saved in local storage only.
+       <button type="button" id="export-data" class="btn-link">Export a backup</button> ·
+       <button type="button" id="import-data" class="btn-link">Import a backup</button> ·
        <button type="button" id="reset-data" class="btn-link">Reset all data</button></p>
+    <input type="file" id="import-file" accept="application/json,.json" hidden>
   </footer>
 
   <script type="module" src="js/app.js"></script>
