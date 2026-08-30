@@ -136,9 +136,10 @@ index.html            page structure
 styles.css            theme (light/dark), layout, chart chrome
 js/projection.js      pure projection engine (no DOM)
 js/expenses.js        pure month/variance/average helpers (no DOM)
+js/state.js           state shape, persistence, sanitising (no DOM)
 js/chart.js           interactive SVG chart renderer
-js/app.js             state, persistence, inputs, spending log, tiles, table
-tests/                engine and spending-log tests
+js/app.js             inputs, spending log, tiles, table — the DOM layer
+tests/                engine, spending-log and state tests
 serve.py              dev server with caching disabled
 setup.sh              provisions the local toolchain (venv + Node)
 docs/TODO.md          known gaps, deferred work, and decisions made on purpose

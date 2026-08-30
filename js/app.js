@@ -1,134 +1,24 @@
 import { project, CPF, TAX } from "./projection.js";
 import { renderChart } from "./chart.js";
 import {
-  OTHER_ID, MONTH_RE, monthKey, addMonths, formatMonth,
+  OTHER_ID, monthKey, addMonths, formatMonth,
   activeCategories, categoryBudgetTotal,
   isLogged, loggedMonths, monthVariance, effectiveExpenses,
 } from "./expenses.js";
+import {
+  DEFAULT_STATE, ACCOUNT_TYPES,
+  loadState, writeState, clearState, mergeSaved, newId,
+} from "./state.js";
 
-const STORAGE_KEY = "wealth-projection-v3";
-const LEGACY_STORAGE_KEY = "wealth-projection-v2";
-
-const DEFAULT_STATE = {
-  theme: "system",
-  currency: "S$",
-  currentAge: 30,
-  retirementAge: 65,
-  endAge: 95,
-  monthlyGrossIncome: 6000,
-  monthlyExpenses: 3500,
-  monthlyRetirementSpend: 3500,
-  returnRate: 6,
-  inflationRate: 2,
-  incomeGrowthRate: 3,
-  includeTax: true,
-  cpf: {
-    enabled: true,
-    oa: 30000,
-    sa: 12000,
-    ma: 18000,
-  },
-  accounts: [
-    { name: "Bank account", type: "cash", value: 5000 },
-    { name: "Brokerage", type: "investments", value: 20000 },
-    { name: "SRS", type: "retirement", value: 10000 },
-  ],
-  spendCategories: [],            // optional: [{ id, name, budget, archived }]
-  spendLog: {},                   // "YYYY-MM" -> { byCategory: { id: n }, other: n }
-  useActualsForForecast: false,
-};
-
-const ACCOUNT_TYPES = ["cash", "investments", "retirement", "property", "other"];
-
-let state = loadState();
+let state = loadState(localStorage);
 let disposeChart = () => {};
 // Which month the log is showing. Deliberately not persisted: opening the app in
 // December should show December, not wherever you last browsed to.
 let selectedMonth = monthKey(new Date());
 
 /* ---------- persistence ---------- */
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return mergeSaved(JSON.parse(raw));
-    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy) {
-      // v2 stored take-home income plus a separate CPF gross salary; income
-      // is now gross, so prefer the old gross salary when it exists.
-      const old = JSON.parse(legacy);
-      old.monthlyGrossIncome = old.cpf?.grossMonthlySalary ?? old.monthlyIncome;
-      delete old.monthlyIncome;
-      return mergeSaved(old);
-    }
-  } catch { /* corrupt storage — fall back to defaults */ }
-  return structuredClone(DEFAULT_STATE);
-}
-
-function mergeSaved(saved) {
-  const merged = { ...structuredClone(DEFAULT_STATE), ...saved };
-  merged.cpf = { ...structuredClone(DEFAULT_STATE.cpf), ...(saved.cpf || {}) };
-  delete merged.cpf.grossMonthlySalary;
-  // Replaced wholesale, then sanitised — deep-merging would resurrect deleted
-  // categories, and an imported file is no longer a trusted source.
-  merged.spendCategories = sanitiseCategories(saved.spendCategories);
-  merged.spendLog = sanitiseLog(saved.spendLog);
-  merged.useActualsForForecast = Boolean(saved.useActualsForForecast);
-  if ("accounts" in (saved || {})) merged.accounts = sanitiseAccounts(saved.accounts);
-  return merged;
-}
-
-/**
- * Accounts are rendered and mutated in place, so anything that isn't a list of
- * plain objects would throw mid-render — and an imported file is not trusted.
- */
-function sanitiseAccounts(list) {
-  if (!Array.isArray(list)) return structuredClone(DEFAULT_STATE.accounts);
-  return list
-    .filter((a) => a && typeof a === "object")
-    .map((a) => ({
-      name: String(a.name ?? ""),
-      type: ACCOUNT_TYPES.includes(a.type) ? a.type : "other",
-      value: Number.isFinite(a.value) ? a.value : 0,
-    }));
-}
-
-function newId() {
-  return crypto.randomUUID?.() ?? `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function sanitiseCategories(list) {
-  if (!Array.isArray(list)) return [];
-  const seen = new Set();
-  return list.filter((c) => c && typeof c === "object").map((c) => {
-    let id = typeof c.id === "string" && c.id && !seen.has(c.id) ? c.id : newId();
-    seen.add(id);
-    const cat = { id, name: String(c.name ?? "") };
-    if (Number.isFinite(c.budget)) cat.budget = c.budget;
-    if (c.archived) cat.archived = true;
-    return cat;
-  });
-}
-
-function sanitiseLog(log) {
-  if (!log || typeof log !== "object") return {};
-  const out = {};
-  for (const key of Object.keys(log)) {
-    if (!MONTH_RE.test(key)) continue;
-    const entry = log[key];
-    if (!entry || typeof entry !== "object") continue;
-    const clean = { byCategory: {} };
-    const by = entry.byCategory && typeof entry.byCategory === "object" ? entry.byCategory : {};
-    for (const id of Object.keys(by)) {
-      if (Number.isFinite(by[id]) && by[id] >= 0) clean.byCategory[id] = by[id];
-    }
-    if (Number.isFinite(entry.other) && entry.other >= 0) clean.other = entry.other;
-    if (isLogged({ [key]: clean }, key)) out[key] = clean;
-  }
-  return out;
-}
-
 function saveState() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+  writeState(localStorage, state);
 }
 
 /* ---------- formatting ---------- */
@@ -846,8 +736,7 @@ document.getElementById("log-today").addEventListener("click", () => {
 
 document.getElementById("reset-data").addEventListener("click", () => {
   if (!confirm("Reset all data to the defaults?")) return;
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(LEGACY_STORAGE_KEY); // else the old data loads again on reload
+  clearState(localStorage);
   state = structuredClone(DEFAULT_STATE);
   selectedMonth = monthKey(new Date());
   rerenderAll();

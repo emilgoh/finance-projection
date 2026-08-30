@@ -6,53 +6,36 @@ it sits where it does.
 
 ## Now
 
-**1. Extract state and persistence into a testable module.**
-`js/app.js` is 938 lines and 47 functions covering state, persistence,
-sanitising, three render trees, month navigation and file I/O. It is the only
-untested file that touches saved data, and **every one of the nine bugs found in
-the code review of the tracker work lived in it** — including one where an
-imported backup could be persisted and then throw on every subsequent load.
-That combination, highest bug density plus custody of the user's data plus zero
-coverage, is what puts it first. The cut: a pure `js/state.js` holding
-`DEFAULT_STATE`, `loadState`/`mergeSaved`/`saveState` and the three `sanitise*`
-helpers, no DOM, tested the way `projection.js` and `expenses.js` already are.
-
-**2. Add CI.**
-There is no `.github/` at all, so nothing runs `node --test` on push. Roughly
-fifteen lines of YAML — `actions/setup-node` plus `node --test` — and it then
-guards every future change for free. Ranked this high purely on effort-to-payoff;
-it is the cheapest item in the file. Worth doing right after item 1, so the new
-tests it protects actually exist.
-
-## Next
-
-**3. Make backups harder to forget.**
-*(Added while ranking — it was missing and it is the largest user-facing risk.)*
+**1. Make backups harder to forget.**
 Everything lives in one browser's local storage. Clearing site data destroys
 months of logging, and nothing prompts an export. The logging habit only just
 started, so the exposure grows from here. The cheap version is a line in the
 footer — "last backup: 3 months ago" — driven by a stored timestamp, not
-automatic uploads or a sync backend.
+automatic uploads or a sync backend. Now the largest remaining risk to real
+data, which is what moved it to the top.
 
-**4. Per-month notes.**
+**2. Per-month notes.**
 "Why was June high?" is the obvious next question the log provokes and currently
 cannot answer. One optional free-text field per month entry covers it. Ranked
 above the other features because it is the one the tracker's own output leads
-you to ask.
+you to ask. Additive to `spendLog` entries, so `sanitiseLog()` in `js/state.js`
+needs a matching case — and now has a test file to put it in.
 
-**5. Refresh `docs/screenshot-light.png` and `docs/screenshot-dark.png`.**
+## Next
+
+**3. Refresh `docs/screenshot-light.png` and `docs/screenshot-dark.png`.**
 They predate the categories card, the monthly log and the backup controls, and
 the README leads with them. Zero functional risk, which is why it sits below the
 work above — but it is quick, and it is the first thing any reader sees.
 
 ## Later, or only on demand
 
-**6. Bulk entry.**
+**4. Bulk entry.**
 Backfilling a year means twelve rounds of stepping and typing. A CSV paste or
 import would fix that. Deliberately low: it only matters if someone actually
 backfills, and nobody has yet. Promote it the moment that changes.
 
-**7. A spend-history visual.**
+**5. A spend-history visual.**
 Left out by design — the variance table answers "which category am I over on,
 and by how much" better than a chart would, and a per-category breakdown needs
 5–8 hues when only `--series-nominal` and `--series-real` exist. If wanted, the
@@ -62,14 +45,26 @@ the last 12 logged months with a dashed budget reference line: one hue plus
 Prerequisite: `bindViewToggle()` is hardcoded to two buttons and two panes and
 must be generalised before a third tab can exist.
 
-**8. A DOM test harness.**
-`app.js` and `chart.js` have no automated coverage; both are verified by hand.
-Last because it is the only item that would add a dependency (jsdom or a
-headless runner) to a project that has deliberately had none — and because doing
-item 1 first shrinks the untested surface enough that this may never be worth
-it. Reassess only after the pure parts are extracted.
+**6. A DOM test harness.**
+`app.js` and `chart.js` still have no automated coverage; both are verified by
+hand. Last because it is the only item that would add a dependency (jsdom or a
+headless runner) to a project that has deliberately had none. The state
+extraction has now happened and took the highest-risk logic with it, so what is
+left in `app.js` is rendering and event wiring — cheap to eyeball, expensive to
+harness. Leaning towards never.
 
 ---
+
+## Done
+
+- **State and persistence extracted to `js/state.js`** (was item 1). No DOM, no
+  reach for `localStorage` — storage is passed in, so `tests/state.test.mjs`
+  hands it a plain object. Covers the corrupt-blob, hostile-import, duplicate-id
+  and negative-amount cases the tracker code review turned up. `app.js` keeps a
+  one-line `saveState()` wrapper so its twenty call sites did not have to change.
+
+- **CI added** (was item 2). `.github/workflows/tests.yml` runs `node --test` on
+  every push and pull request.
 
 ## Gotchas — resolved, don't regress
 
