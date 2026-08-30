@@ -83,6 +83,10 @@ Annual steps, deliberately simple:
 - From retirement age on, that year's inflation-adjusted retirement spending is
   withdrawn instead (net of CPF LIFE payouts once they start). If liquid
   savings hit zero they stay there (no borrowing).
+- One-off **life events** (wedding, home down payment, kids' university) are
+  entered in today's money at a given age; each is inflated to that year and
+  spent from liquid savings when it lands. A large enough one in retirement can
+  deplete savings.
 - "Today's money" divides nominal values by cumulative inflation.
 - Financial independence is measured against assets *outside* CPF, since CPF is
   locked until the payout age.

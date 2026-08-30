@@ -182,6 +182,51 @@ test("CPF: senior contribution rates step down with age", () => {
   assert.equal(CPF.rateForAge(75), 0.125);
 });
 
+/* ---------- life events ---------- */
+
+test("events: spent in the right year, inflated from today's money", () => {
+  const plain = project(base);
+  const withEvent = project({
+    ...base,
+    events: [{ name: "wedding", age: 35, amount: 50000 }],
+  });
+  const t = 5; // age 35
+  const cost = 50000 * 1.025 ** t;
+  // the two projections only diverge from the event year onward
+  assert.equal(withEvent.rows[t - 1].nominal, plain.rows[t - 1].nominal);
+  assert.ok(Math.abs((plain.rows[t].nominal - withEvent.rows[t].nominal) - cost) < 1e-6);
+});
+
+test("events: several in one year add up; out-of-range ages are ignored", () => {
+  const doubled = project({
+    ...base,
+    events: [
+      { name: "a", age: 35, amount: 20000 },
+      { name: "b", age: 35, amount: 30000 },
+      { name: "too early", age: 30, amount: 99999 }, // current age: no year to land in
+      { name: "too late", age: 200, amount: 99999 },
+    ],
+  });
+  const single = project({
+    ...base,
+    events: [{ name: "wedding", age: 35, amount: 50000 }],
+  });
+  assert.deepEqual(
+    doubled.rows.map((r) => r.nominal),
+    single.rows.map((r) => r.nominal),
+  );
+});
+
+test("events: a big retirement expense can deplete savings", () => {
+  const calm = project(cpfBase);
+  const hit = project({
+    ...cpfBase,
+    events: [{ name: "medical", age: 80, amount: 5000000 }],
+  });
+  assert.equal(calm.depletedAge, null);
+  assert.equal(hit.depletedAge, 80);
+});
+
 /* ---------- Singapore income tax ---------- */
 
 test("tax brackets match IRAS cumulative figures", () => {

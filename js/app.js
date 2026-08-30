@@ -290,6 +290,77 @@ function updateBudgetTotal() {
   line.textContent = text;
 }
 
+/* ---------- life events ---------- */
+
+/**
+ * One-off big expenses in today's money. The engine inflates each to the year
+ * the age is reached, so what is typed here stays comparable to the plan
+ * figures above it.
+ */
+function renderEvents() {
+  const list = document.getElementById("events-list");
+  list.textContent = "";
+  for (const event of state.events) {
+    const row = document.createElement("div");
+    row.className = "event-row";
+
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = event.name;
+    name.placeholder = "Event (e.g. home down payment)";
+    name.setAttribute("aria-label", "Event name");
+    name.addEventListener("input", () => {
+      event.name = name.value;
+      remove.setAttribute("aria-label", `Remove ${event.name || "event"}`);
+      saveState();
+    });
+
+    const age = document.createElement("input");
+    age.type = "number";
+    age.step = "1";
+    age.min = "16";
+    age.max = "120";
+    age.value = event.age ?? "";
+    age.setAttribute("aria-label", "At age");
+    age.title = "At age";
+    age.addEventListener("input", () => {
+      // Cleared, or mid-typing garbage: null keeps the row editable and the
+      // engine skips it, rather than silently spending in year zero.
+      event.age = num(age.value, null);
+      saveState();
+      recompute();
+    });
+
+    const amount = document.createElement("input");
+    amount.type = "number";
+    amount.step = "1000";
+    amount.min = "0";
+    amount.value = event.amount;
+    amount.setAttribute("aria-label", `Amount in today's ${state.currency}`);
+    amount.addEventListener("input", () => {
+      event.amount = Math.max(0, num(amount.value, 0));
+      saveState();
+      recompute();
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "account-remove";
+    remove.textContent = "\u00d7";
+    remove.setAttribute("aria-label", `Remove ${event.name || "event"}`);
+    remove.addEventListener("click", () => {
+      const i = state.events.indexOf(event);
+      if (i >= 0) state.events.splice(i, 1);
+      saveState();
+      renderEvents();
+      recompute();
+    });
+
+    row.append(name, age, amount, remove);
+    list.append(row);
+  }
+}
+
 /* ---------- monthly spending log ---------- */
 function entryFor(key) {
   if (!state.spendLog[key]) state.spendLog[key] = { byCategory: {} };
@@ -505,6 +576,7 @@ function recompute() {
     incomeGrowthRate: state.incomeGrowthRate,
     includeTax: state.includeTax,
     cpf: state.cpf,
+    events: state.events,
   });
 
   updateIncomeHint();
@@ -718,6 +790,15 @@ document.getElementById("add-account").addEventListener("click", () => {
   rows[rows.length - 1]?.querySelector("input")?.focus();
 });
 
+document.getElementById("add-event").addEventListener("click", () => {
+  state.events.push({ name: "", age: state.currentAge + 5, amount: 0 });
+  saveState();
+  renderEvents();
+  recompute();
+  const rows = document.querySelectorAll("#events-list .event-row");
+  rows[rows.length - 1]?.querySelector("input")?.focus();
+});
+
 document.getElementById("add-category").addEventListener("click", () => {
   state.spendCategories.push({ id: newId(), name: "" });
   saveState();
@@ -810,6 +891,7 @@ function rerenderAll() {
   applyTheme();
   syncInputsFromState();
   renderAccounts();
+  renderEvents();
   renderBudget();
   renderLog();
   renderBackupStatus();
@@ -842,6 +924,7 @@ bindPlanInputs();
 bindCpfInputs();
 bindViewToggle();
 renderAccounts();
+renderEvents();
 renderBudget();
 renderLog();
 renderBackupStatus();

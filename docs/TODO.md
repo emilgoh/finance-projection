@@ -66,6 +66,19 @@ harness. Leaning towards never.
 - **CI added** (was item 2). `.github/workflows/tests.yml` runs `node --test` on
   every push and pull request.
 
+- **Backup staleness surfaced in the footer.** `state.lastBackupAt` is stamped
+  on export; importing takes the file's own `exportedAt`, since that is when
+  the data now on screen was last safe.
+
+- **Life events ported from `claude/events-import-export`.** That branch was one
+  commit ahead of its merge base and held three things: life events (ported),
+  JSON import/export (already in `main`, and the newer version is better — it
+  validates `payload.app`, routes through `mergeSaved`, and fixes a Firefox
+  `revokeObjectURL` race the old one loses the download to), and a README TODO
+  section (superseded by this file). The old app-layer code was not reused: it
+  bypassed `sanitiseAccounts` and never sanitised events at all. **The branch
+  has nothing left to port — it can be deleted.**
+
 ## Gotchas — resolved, don't regress
 
 Not tasks. Traps already hit once, recorded so they are not reintroduced.
