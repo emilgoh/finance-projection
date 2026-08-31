@@ -140,7 +140,7 @@ button { font: inherit; color: inherit; }
 .plan-check { margin-top: 14px; }
 .plan-check small { color: var(--text-muted); font-size: 0.75rem; }
 input[type="number"], select, .account-row input, .account-row select,
-.event-row input {
+.one-off-row input {
   background: var(--page);
   color: var(--text-primary);
   border: 1px solid var(--border);
@@ -158,24 +158,24 @@ input:focus-visible, select:focus-visible, button:focus-visible, .chart-region:f
 
 .h2-hint { font-weight: 400; color: var(--text-muted); font-size: 0.85rem; }
 
-/* life events */
-.events-card { grid-column: 1 / -1; }
-.events-list { display: flex; flex-direction: column; gap: 8px; }
-.event-row {
+/* life events and windfalls — same row, opposite sign */
+.one-off-card { grid-column: 1 / -1; }
+.one-off-list { display: flex; flex-direction: column; gap: 8px; }
+.one-off-row {
   display: grid;
   grid-template-columns: 1.6fr 0.6fr 1fr auto;
   gap: 8px;
   align-items: center;
 }
 @media (max-width: 560px) {
-  .event-row { grid-template-columns: 0.8fr 1.2fr auto; }
-  .event-row input[type="text"] { grid-column: 1 / -1; }
+  .one-off-row { grid-template-columns: 0.8fr 1.2fr auto; }
+  .one-off-row input[type="text"] { grid-column: 1 / -1; }
 }
-.events-footer {
+.one-off-footer {
   display: flex; justify-content: space-between; align-items: center;
   gap: 12px; margin-top: 14px; flex-wrap: wrap;
 }
-.events-hint { margin: 0; color: var(--text-secondary); font-size: 0.9rem; max-width: 60ch; }
+.one-off-hint { margin: 0; color: var(--text-secondary); font-size: 0.9rem; max-width: 60ch; }
 
 /* CPF */
 .cpf-card { grid-column: 1 / -1; }

@@ -100,6 +100,12 @@ Annual steps, deliberately simple:
   entered in today's money at a given age; each is inflated to that year and
   spent from liquid savings when it lands. A large enough one in retirement can
   deplete savings.
+- One-off **windfalls** (bonus, inheritance, sale of a car or a property) are
+  the mirror image: entered the same way, inflated the same way, but paid into
+  liquid savings. They are treated as untaxed and outside CPF, which is right
+  for gifts, inheritance and asset sales in Singapore — a cash bonus from an
+  employer would really attract both, so model that by raising your income
+  instead if it matters.
 - "Today's money" divides nominal values by cumulative inflation.
 - Financial independence is measured against assets *outside* CPF, since CPF is
   locked until the payout age.

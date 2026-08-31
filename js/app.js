@@ -296,28 +296,43 @@ function updateBudgetTotal() {
   line.textContent = text;
 }
 
-/* ---------- life events ---------- */
+/* ---------- life events & windfalls ---------- */
 
 /**
- * One-off big expenses in today's money. The engine inflates each to the year
+ * Life events (money out) and windfalls (money in) are the same row: a name,
+ * an age, and an amount in today's money. The engine inflates each to the year
  * the age is reached, so what is typed here stays comparable to the plan
- * figures above it.
+ * figures above it. Only the wording and which list is mutated differ.
  */
-function renderEvents() {
-  const list = document.getElementById("events-list");
+const ONE_OFF_LISTS = {
+  events: {
+    listId: "events-list",
+    noun: "event",
+    placeholder: "Event (e.g. home down payment)",
+  },
+  windfalls: {
+    listId: "windfalls-list",
+    noun: "windfall",
+    placeholder: "Windfall (e.g. inheritance)",
+  },
+};
+
+function renderOneOffs(kind) {
+  const { listId, noun, placeholder } = ONE_OFF_LISTS[kind];
+  const list = document.getElementById(listId);
   list.textContent = "";
-  for (const event of state.events) {
+  for (const entry of state[kind]) {
     const row = document.createElement("div");
-    row.className = "event-row";
+    row.className = "one-off-row";
 
     const name = document.createElement("input");
     name.type = "text";
-    name.value = event.name;
-    name.placeholder = "Event (e.g. home down payment)";
-    name.setAttribute("aria-label", "Event name");
+    name.value = entry.name;
+    name.placeholder = placeholder;
+    name.setAttribute("aria-label", `${cap(noun)} name`);
     name.addEventListener("input", () => {
-      event.name = name.value;
-      remove.setAttribute("aria-label", `Remove ${event.name || "event"}`);
+      entry.name = name.value;
+      remove.setAttribute("aria-label", `Remove ${entry.name || noun}`);
       saveState();
     });
 
@@ -326,13 +341,13 @@ function renderEvents() {
     age.step = "1";
     age.min = "16";
     age.max = "120";
-    age.value = event.age ?? "";
+    age.value = entry.age ?? "";
     age.setAttribute("aria-label", "At age");
     age.title = "At age";
     age.addEventListener("input", () => {
       // Cleared, or mid-typing garbage: null keeps the row editable and the
-      // engine skips it, rather than silently spending in year zero.
-      event.age = num(age.value, null);
+      // engine skips it, rather than silently landing in year zero.
+      entry.age = num(age.value, null);
       saveState();
       recompute();
     });
@@ -341,10 +356,10 @@ function renderEvents() {
     amount.type = "number";
     amount.step = "1000";
     amount.min = "0";
-    amount.value = event.amount;
+    amount.value = entry.amount;
     amount.setAttribute("aria-label", `Amount in today's ${state.currency}`);
     amount.addEventListener("input", () => {
-      event.amount = Math.max(0, num(amount.value, 0));
+      entry.amount = Math.max(0, num(amount.value, 0));
       saveState();
       recompute();
     });
@@ -353,18 +368,22 @@ function renderEvents() {
     remove.type = "button";
     remove.className = "account-remove";
     remove.textContent = "\u00d7";
-    remove.setAttribute("aria-label", `Remove ${event.name || "event"}`);
+    remove.setAttribute("aria-label", `Remove ${entry.name || noun}`);
     remove.addEventListener("click", () => {
-      const i = state.events.indexOf(event);
-      if (i >= 0) state.events.splice(i, 1);
+      const i = state[kind].indexOf(entry);
+      if (i >= 0) state[kind].splice(i, 1);
       saveState();
-      renderEvents();
+      renderOneOffs(kind);
       recompute();
     });
 
     row.append(name, age, amount, remove);
     list.append(row);
   }
+}
+
+function cap(word) {
+  return word.charAt(0).toUpperCase() + word.slice(1);
 }
 
 /* ---------- monthly spending log ---------- */
@@ -583,6 +602,7 @@ function recompute() {
     includeTax: state.includeTax,
     cpf: state.cpf,
     events: state.events,
+    windfalls: state.windfalls,
   });
 
   updateIncomeHint();
@@ -833,14 +853,16 @@ document.getElementById("add-account").addEventListener("click", () => {
   rows[rows.length - 1]?.querySelector("input")?.focus();
 });
 
-document.getElementById("add-event").addEventListener("click", () => {
-  state.events.push({ name: "", age: state.currentAge + 5, amount: 0 });
-  saveState();
-  renderEvents();
-  recompute();
-  const rows = document.querySelectorAll("#events-list .event-row");
-  rows[rows.length - 1]?.querySelector("input")?.focus();
-});
+for (const [kind, { listId, noun }] of Object.entries(ONE_OFF_LISTS)) {
+  document.getElementById(`add-${noun}`).addEventListener("click", () => {
+    state[kind].push({ name: "", age: state.currentAge + 5, amount: 0 });
+    saveState();
+    renderOneOffs(kind);
+    recompute();
+    const rows = document.querySelectorAll(`#${listId} .one-off-row`);
+    rows[rows.length - 1]?.querySelector("input")?.focus();
+  });
+}
 
 document.getElementById("add-category").addEventListener("click", () => {
   state.spendCategories.push({ id: newId(), name: "" });
@@ -934,7 +956,8 @@ function rerenderAll() {
   applyTheme();
   syncInputsFromState();
   renderAccounts();
-  renderEvents();
+  renderOneOffs("events");
+  renderOneOffs("windfalls");
   renderBudget();
   renderLog();
   renderBackupStatus();
@@ -968,7 +991,8 @@ bindPlanInputs();
 bindCpfInputs();
 bindViewToggle();
 renderAccounts();
-renderEvents();
+renderOneOffs("events");
+renderOneOffs("windfalls");
 renderBudget();
 renderLog();
 renderBackupStatus();

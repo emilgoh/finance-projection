@@ -4,7 +4,7 @@ import {
   STORAGE_KEY, LEGACY_STORAGE_KEY, DEFAULT_STATE, ACCOUNT_TYPES,
   loadState, writeState, clearState, mergeSaved,
   sanitiseAccounts, sanitiseCategories, sanitiseLog, newId,
-  sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS, sanitiseEvents,
+  sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS, sanitiseOneOffs,
 } from "../js/state.js";
 
 /** Minimal stand-in for localStorage: same three methods, plain object inside. */
@@ -324,14 +324,14 @@ test("mergeSaved: a garbage lastBackupAt cannot render as Invalid Date", () => {
   assert.equal(mergeSaved({ lastBackupAt: iso }).lastBackupAt, iso);
 });
 
-/* ---------- sanitiseEvents ---------- */
+/* ---------- sanitiseOneOffs ---------- */
 
-test("sanitiseEvents: a non-array becomes an empty list", () => {
-  for (const bad of [undefined, null, "x", 7, {}]) assert.deepEqual(sanitiseEvents(bad), []);
+test("sanitiseOneOffs: a non-array becomes an empty list", () => {
+  for (const bad of [undefined, null, "x", 7, {}]) assert.deepEqual(sanitiseOneOffs(bad), []);
 });
 
-test("sanitiseEvents: non-objects are dropped and fields are coerced", () => {
-  const out = sanitiseEvents([
+test("sanitiseOneOffs: non-objects are dropped and fields are coerced", () => {
+  const out = sanitiseOneOffs([
     null,
     "ignored",
     { name: "Wedding", age: 35, amount: 50000 },
@@ -345,19 +345,19 @@ test("sanitiseEvents: non-objects are dropped and fields are coerced", () => {
   assert.deepEqual(out[2], { name: "", age: null, amount: 0 });
 });
 
-test("sanitiseEvents: an unusable age becomes null, never 0", () => {
+test("sanitiseOneOffs: an unusable age becomes null, never 0", () => {
   // 0 would claim to be a real age; null makes the engine skip the row.
-  const out = sanitiseEvents([{ age: NaN }, { age: Infinity }, { age: undefined }]);
+  const out = sanitiseOneOffs([{ age: NaN }, { age: Infinity }, { age: undefined }]);
   for (const e of out) assert.equal(e.age, null);
 });
 
-test("sanitiseEvents: a negative amount becomes 0 rather than income", () => {
-  const out = sanitiseEvents([{ name: "refund", age: 40, amount: -50000 }]);
+test("sanitiseOneOffs: a negative amount becomes 0 rather than income", () => {
+  const out = sanitiseOneOffs([{ name: "refund", age: 40, amount: -50000 }]);
   assert.equal(out[0].amount, 0);
 });
 
-test("sanitiseEvents: age 0 and amount 0 are preserved as given", () => {
-  assert.deepEqual(sanitiseEvents([{ name: "x", age: 0, amount: 0 }]),
+test("sanitiseOneOffs: age 0 and amount 0 are preserved as given", () => {
+  assert.deepEqual(sanitiseOneOffs([{ name: "x", age: 0, amount: 0 }]),
     [{ name: "x", age: 0, amount: 0 }]);
 });
 
@@ -366,6 +366,13 @@ test("mergeSaved: events go through the same funnel as everything else", () => {
   assert.deepEqual(mergeSaved({ events: "nope" }).events, []);
   assert.deepEqual(mergeSaved({ events: [{ name: "Wedding", age: 35, amount: 50000 }] }).events,
     [{ name: "Wedding", age: 35, amount: 50000 }]);
+});
+
+test("mergeSaved: windfalls go through the same funnel as events", () => {
+  assert.deepEqual(mergeSaved({}).windfalls, []);
+  assert.deepEqual(mergeSaved({ windfalls: "nope" }).windfalls, []);
+  assert.deepEqual(mergeSaved({ windfalls: [{ name: "Bonus", age: 35, amount: 20000 }] }).windfalls,
+    [{ name: "Bonus", age: 35, amount: 20000 }]);
 });
 
 test("events survive the storage round trip", () => {
