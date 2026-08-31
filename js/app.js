@@ -5,6 +5,7 @@ import {
   activeCategories, categoryBudgetTotal,
   isLogged, loggedMonths, monthVariance, effectiveExpenses,
 } from "./expenses.js";
+import { PAGES, pageFromHash, startRouter } from "./router.js";
 import {
   DEFAULT_STATE, ACCOUNT_TYPES,
   loadState, writeState, clearState, mergeSaved, newId, backupHint, sanitiseTimestamp,
@@ -15,6 +16,11 @@ let disposeChart = () => {};
 // Which month the log is showing. Deliberately not persisted: opening the app in
 // December should show December, not wherever you last browsed to.
 let selectedMonth = monthKey(new Date());
+// Which of the two pages is on screen. The hash is the source of truth; this
+// mirrors it so recompute() knows whether the chart can be measured.
+let currentPage = pageFromHash(location.hash);
+// Set when a projection input changes while the projection page is hidden.
+let resultsStale = false;
 
 /* ---------- persistence ---------- */
 function saveState() {
@@ -583,6 +589,15 @@ function recompute() {
   updateForecastHint();
   updateBudgetTotal(); // the plan figure it quotes may have just changed
   renderLogSummary();
+
+  // The chart measures its container, which reads zero while the projection
+  // page is hidden. Defer the whole results block instead of drawing at a
+  // guessed width, and redraw when the page comes back into view.
+  if (currentPage === "projection") renderResults(result);
+  else resultsStale = true;
+}
+
+function renderResults(result) {
   renderHero(result);
   renderTiles(result);
   disposeChart();
@@ -593,6 +608,7 @@ function recompute() {
   });
   renderTable(result);
   updateChartAria(result);
+  resultsStale = false;
 }
 
 function updateIncomeHint() {
@@ -731,6 +747,33 @@ function updateChartAria(result) {
     `Line chart of projected net worth from age ${state.currentAge} to ${state.endAge}. ` +
     `${fmtFull(ret.nominal)} at retirement age ${state.retirementAge}; ` +
     `${fmtFull(last.nominal)} at age ${last.age}. Full figures in the table view.`);
+}
+
+/* ---------- pages ---------- */
+const PAGE_COPY = {
+  projection: {
+    title: "Wealth Projection",
+    tagline: "Track what you own today and see where it takes you.",
+  },
+  tracker: {
+    title: "Monthly tracker · Wealth Projection",
+    tagline: "Log what you actually spent, month by month, against your budget.",
+  },
+};
+
+function showPage(page) {
+  currentPage = page;
+  for (const name of PAGES) {
+    document.getElementById(`page-${name}`).hidden = name !== page;
+    const link = document.getElementById(`nav-${name}`);
+    if (name === page) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  document.title = PAGE_COPY[page].title;
+  document.getElementById("tagline").textContent = PAGE_COPY[page].tagline;
+  // The modelling caveats only describe the projection, so they follow it.
+  document.getElementById("model-notes").hidden = page !== "projection";
+  if (page === "projection" && resultsStale) recompute();
 }
 
 /* ---------- theme ---------- */
@@ -919,6 +962,7 @@ darkQuery.addEventListener("change", () => {
 });
 
 applyTheme();
+startRouter(window, showPage);
 bindThemeToggle();
 bindPlanInputs();
 bindCpfInputs();

@@ -47,6 +47,11 @@ It finishes by running the test suite. `rm -rf .venv .tools` undoes all of it.
 
 ## What it shows
 
+The app has two pages, switched from the tabs under the title and addressed by
+the URL hash — `#/projection` and `#/tracker`, so either can be bookmarked.
+
+### Projection
+
 - **Hero figure** — projected net worth at your retirement age, nominal and in
   today's money.
 - **Stat tiles** — your financial-independence target (25× yearly retirement
@@ -54,21 +59,29 @@ It finishes by running the test suite. `rm -rf .venv .tools` undoes all of it.
   money lasts to the end of the plan.
 - **Interactive chart** — net worth over time, nominal and inflation-adjusted,
   with a retirement marker and a crosshair tooltip (mouse or arrow keys).
-- **Light & dark mode** — follows your system by default; the sun/moon button
-  in the top-right corner switches theme, and the choice is remembered.
-- **Monthly spending log** — log what you actually spent each month, optionally
-  split by category, and see it against your budget. Overspend shows as `+`, an
+- **Table view** — the same projection as year-by-year figures: net worth,
+  today's-money value, CPF balance, amount saved or withdrawn, and investment
+  growth.
+
+### Monthly tracker
+
+- **Spending categories** — optionally split your spending, with a budget
+  against each category. Leave it empty to log a single total each month.
+- **Monthly spending log** — log what you actually spent each month, split by
+  those categories, and see it against your budget. Overspend shows as `+`, an
   underspend as `−`.
 - **Forecast from your actuals** — a checkbox swaps the projection's spending
   assumption from the figure in your plan to the average of every month you have
   logged. Until a completed month exists it falls back to the plan figure and
   says so. Retirement spending is a separate, forward-looking assumption and is
   never affected.
+
+### On both pages
+
+- **Light & dark mode** — follows your system by default; the sun/moon button
+  in the top-right corner switches theme, and the choice is remembered.
 - **Backups** — export everything to a JSON file and import it back, to move
   between browsers or keep a copy.
-- **Table view** — the same projection as year-by-year figures: net worth,
-  today's-money value, CPF balance, amount saved or withdrawn, and investment
-  growth.
 
 ## The model
 
@@ -141,9 +154,10 @@ styles.css            theme (light/dark), layout, chart chrome
 js/projection.js      pure projection engine (no DOM)
 js/expenses.js        pure month/variance/average helpers (no DOM)
 js/state.js           state shape, persistence, sanitising (no DOM)
+js/router.js          hash routing between the two pages (no DOM)
 js/chart.js           interactive SVG chart renderer
 js/app.js             inputs, spending log, tiles, table — the DOM layer
-tests/                engine, spending-log and state tests
+tests/                engine, spending-log, state and router tests
 serve.py              dev server with caching disabled
 setup.sh              provisions the local toolchain (venv + Node)
 docs/TODO.md          known gaps, deferred work, and decisions made on purpose
