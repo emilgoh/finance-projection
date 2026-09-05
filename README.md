@@ -66,10 +66,18 @@ the URL hash — `#/projection` and `#/tracker`, so either can be bookmarked.
 ### Monthly tracker
 
 - **Spending categories** — optionally split your spending, with a budget
-  against each category. Leave it empty to log a single total each month.
+  against each category and a fixed/variable mark on it. Fixed is the same bill
+  every month — rent, insurance, loans; variable is what you decide each month.
+  Leave it empty to log a single total.
 - **Monthly spending log** — log what you actually spent each month, split by
   those categories, and see it against your budget. Overspend shows as `+`, an
-  underspend as `−`.
+  underspend as `−`. Once anything is marked fixed the log groups itself into
+  fixed and variable, each with its own subtotal.
+- **Savings buckets and log** — where the money you keep actually goes
+  (emergency fund, brokerage, a specific goal), with an optional monthly target
+  each, logged the same way. Here `+` is ahead of target and `−` is short of it.
+  A line under the two logs gives the month's savings rate as a share of what
+  you logged.
 - **Forecast from your actuals** — a checkbox swaps the projection's spending
   assumption from the figure in your plan to the average of every month you have
   logged. Until a completed month exists it falls back to the plan figure and
@@ -158,12 +166,12 @@ CPF parameters (in `js/projection.js`) are based on:
 index.html            page structure
 styles.css            theme (light/dark), layout, chart chrome
 js/projection.js      pure projection engine (no DOM)
-js/expenses.js        pure month/variance/average helpers (no DOM)
+js/expenses.js        pure month/variance/average helpers, spending and savings (no DOM)
 js/state.js           state shape, persistence, sanitising (no DOM)
 js/router.js          hash routing between the two pages (no DOM)
 js/chart.js           interactive SVG chart renderer
-js/app.js             inputs, spending log, tiles, table — the DOM layer
-tests/                engine, spending-log, state and router tests
+js/app.js             inputs, monthly logs, tiles, table — the DOM layer
+tests/                engine, monthly-log, state and router tests
 serve.py              dev server with caching disabled
 setup.sh              provisions the local toolchain (venv + Node)
 docs/TODO.md          known gaps, deferred work, and decisions made on purpose

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   STORAGE_KEY, LEGACY_STORAGE_KEY, DEFAULT_STATE, ACCOUNT_TYPES,
   loadState, writeState, clearState, mergeSaved,
-  sanitiseAccounts, sanitiseCategories, sanitiseLog, newId,
+  sanitiseAccounts, sanitiseCategories, sanitiseSavingsBuckets, sanitiseLog, newId,
   sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS, sanitiseOneOffs,
 } from "../js/state.js";
 
@@ -75,8 +75,10 @@ test("a saved state reloads unchanged — no value is lost or re-sanitised away"
   const storage = fakeStorage();
   const original = loadState(storage);
   original.currentAge = 44;
-  original.spendCategories = [{ id: "c1", name: "Food", budget: 800 }];
+  original.spendCategories = [{ id: "c1", name: "Food", kind: "variable", budget: 800 }];
   original.spendLog = { "2026-06": { byCategory: { c1: 750 }, other: 20 } };
+  original.savingsBuckets = [{ id: "b1", name: "Emergency fund", target: 500 }];
+  original.savingsLog = { "2026-06": { byCategory: { b1: 500 }, other: 100 } };
   original.useActualsForForecast = true;
   writeState(storage, original);
   assert.deepEqual(loadState(storage), original);
@@ -381,4 +383,74 @@ test("events survive the storage round trip", () => {
   state.events = [{ name: "Down payment", age: 34, amount: 200000 }];
   writeState(storage, state);
   assert.deepEqual(loadState(storage), state);
+});
+
+/* ---------- the fixed/variable split and savings ---------- */
+
+test("sanitiseCategories: kind is always written out, defaulting to variable", () => {
+  const out = sanitiseCategories([
+    { id: "a", name: "Rent", kind: "fixed" },
+    { id: "b", name: "Food", kind: "variable" },
+    { id: "c", name: "Legacy" },
+    { id: "d", name: "Hostile", kind: "FIXED" },
+    { id: "e", name: "Worse", kind: { toString: () => "fixed" } },
+  ]);
+  assert.deepEqual(out.map((c) => c.kind),
+    ["fixed", "variable", "variable", "variable", "variable"]);
+});
+
+test("sanitiseSavingsBuckets: a target is kept only when finite, and buckets have no kind", () => {
+  const out = sanitiseSavingsBuckets([
+    { id: "a", name: "Emergency", target: 500 },
+    { id: "b", name: "Zero", target: 0 },
+    { id: "c", name: "String", target: "500" },
+    { id: "d", name: "Gone", target: 200, archived: true },
+  ]);
+  assert.equal(out[0].target, 500);
+  assert.equal(out[1].target, 0, "a zero target is a real target");
+  assert.ok(!("target" in out[2]), "a string target is dropped, not coerced");
+  assert.equal(out[3].archived, true);
+  for (const b of out) assert.ok(!("kind" in b), "buckets are not split fixed/variable");
+});
+
+test("sanitiseSavingsBuckets: duplicate and missing ids are replaced, as for categories", () => {
+  const out = sanitiseSavingsBuckets([{ id: "dup" }, { id: "dup" }, {}]);
+  assert.equal(new Set(out.map((b) => b.id)).size, 3);
+});
+
+test("sanitiseSavingsBuckets: a non-array becomes an empty list", () => {
+  for (const bad of [undefined, null, "x", {}]) assert.deepEqual(sanitiseSavingsBuckets(bad), []);
+});
+
+test("mergeSaved: the savings log passes through the same funnel as the spend log", () => {
+  const merged = mergeSaved({
+    savingsLog: {
+      "2026-06": { byCategory: { b1: 500, bad: -20 }, other: 100 },
+      "not-a-month": { other: 999 },
+      "2026-07": { byCategory: { b1: "500" } },
+    },
+  });
+  assert.deepEqual(Object.keys(merged.savingsLog), ["2026-06"]);
+  assert.deepEqual(merged.savingsLog["2026-06"], { byCategory: { b1: 500 }, other: 100 });
+});
+
+test("mergeSaved: a missing savings key yields empty, never undefined to render against", () => {
+  const merged = mergeSaved({ currentAge: 40 });
+  assert.deepEqual(merged.savingsBuckets, []);
+  assert.deepEqual(merged.savingsLog, {});
+});
+
+test("mergeSaved: a hostile savings blob still produces a loadable state", () => {
+  const merged = mergeSaved({ savingsBuckets: "nope", savingsLog: [1, 2, 3] });
+  assert.deepEqual(merged.savingsBuckets, []);
+  assert.deepEqual(merged.savingsLog, {});
+});
+
+test("the two logs stay independent — one cannot leak ids into the other", () => {
+  const merged = mergeSaved({
+    spendLog: { "2026-06": { byCategory: { c1: 1500 } } },
+    savingsLog: { "2026-06": { byCategory: { b1: 500 } } },
+  });
+  assert.deepEqual(Object.keys(merged.spendLog["2026-06"].byCategory), ["c1"]);
+  assert.deepEqual(Object.keys(merged.savingsLog["2026-06"].byCategory), ["b1"]);
 });

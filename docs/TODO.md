@@ -57,6 +57,14 @@ harness. Leaning towards never.
 
 ## Done
 
+- **Savings tracking and the fixed/variable expense split.** `savingsBuckets`
+  and `savingsLog` mirror `spendCategories` and `spendLog` exactly — same entry
+  shape, same sanitiser, same archive-on-delete rule — so `js/expenses.js`
+  serves both from one `varianceRows()`, with the sign convention (over budget
+  is bad, over target is good) left to the caller. Categories gained a `kind`,
+  which `sanitiseCategories()` always writes out and which defaults to variable
+  for anything older or hostile.
+
 - **State and persistence extracted to `js/state.js`** (was item 1). No DOM, no
   reach for `localStorage` — storage is passed in, so `tests/state.test.mjs`
   hands it a plain object. Covers the corrupt-blob, hostile-import, duplicate-id
@@ -118,6 +126,25 @@ These read like bugs and are not.
   it.** Past months keep their names and their totals never shift underneath the
   user. Amounts belonging to ids with no live category still count toward month
   totals and render as "Uncategorised".
+
+- **Logged savings never reach the projection.** The engine already derives
+  saving from income minus expenses; feeding it the savings log too would either
+  double-count or silently override that derivation. The savings log is a
+  reality check on the plan, the same way the variance table is — display only,
+  by design. The spending log's actuals checkbox is the one exception, and it
+  replaces a single input rather than adding a second source of truth.
+
+- **The fixed/variable split is presentational.** It groups the log and gives
+  each group a subtotal. No total, no average and no forecast changes because of
+  it — a category's kind is a label on the row, not an input to any arithmetic.
+  "Other" and orphaned ids count as variable: nothing left standing says they
+  were a commitment, and variable overstates what could be cut rather than
+  understating it.
+
+- **A group subtotal's budget counts only the rows that set one.** A group
+  holding unbudgeted rows therefore reports a variance against a partial budget.
+  The alternative — treating an unbudgeted row as budgeted at zero — would make
+  every such group look like an overspend.
 
 - **`js/projection.js` is annual and has no month concept.** The tracker feeds it
   a single derived `annualExpenses` scalar. Making the engine monthly would mean

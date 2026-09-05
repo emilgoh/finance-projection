@@ -35,8 +35,10 @@ export const DEFAULT_STATE = {
     { name: "Brokerage", type: "investments", value: 20000 },
     { name: "SRS", type: "retirement", value: 10000 },
   ],
-  spendCategories: [],            // optional: [{ id, name, budget, archived }]
+  spendCategories: [],            // optional: [{ id, name, kind, budget, archived }]
   spendLog: {},                   // "YYYY-MM" -> { byCategory: { id: n }, other: n }
+  savingsBuckets: [],             // optional: [{ id, name, target, archived }]
+  savingsLog: {},                 // same month-entry shape, keyed by bucket id
   useActualsForForecast: false,
   events: [],                     // optional: [{ name, age, amount }] in today's money
   windfalls: [],                  // optional: [{ name, age, amount }] in today's money
@@ -80,6 +82,8 @@ export function mergeSaved(saved) {
   // categories, and an imported file is no longer a trusted source.
   merged.spendCategories = sanitiseCategories(saved.spendCategories);
   merged.spendLog = sanitiseLog(saved.spendLog);
+  merged.savingsBuckets = sanitiseSavingsBuckets(saved.savingsBuckets);
+  merged.savingsLog = sanitiseLog(saved.savingsLog);
   merged.useActualsForForecast = Boolean(saved.useActualsForForecast);
   merged.events = sanitiseOneOffs(saved.events);
   merged.windfalls = sanitiseOneOffs(saved.windfalls);
@@ -107,16 +111,41 @@ export function newId() {
   return crypto.randomUUID?.() ?? `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/**
+ * `kind` is written out even when it is the default, so a stored category always
+ * says which side of the split it is on rather than leaving the reader to infer
+ * it. Categories saved before the split have no kind and become variable.
+ */
 export function sanitiseCategories(list) {
+  return sanitiseNamedList(list, "budget", (src, cat) => {
+    cat.kind = src.kind === "fixed" ? "fixed" : "variable";
+  });
+}
+
+/**
+ * Savings buckets are categories in a different suit: same ids, same archiving,
+ * a monthly `target` where a category has a `budget`, and no fixed/variable
+ * split — money saved is money saved.
+ */
+export function sanitiseSavingsBuckets(list) {
+  return sanitiseNamedList(list, "target");
+}
+
+/**
+ * Ids have to be unique and present: they key the month log, so a duplicate
+ * would merge two rows' history and a missing one would strand it.
+ */
+function sanitiseNamedList(list, amountKey, decorate) {
   if (!Array.isArray(list)) return [];
   const seen = new Set();
   return list.filter((c) => c && typeof c === "object").map((c) => {
     let id = typeof c.id === "string" && c.id && !seen.has(c.id) ? c.id : newId();
     seen.add(id);
-    const cat = { id, name: String(c.name ?? "") };
-    if (Number.isFinite(c.budget)) cat.budget = c.budget;
-    if (c.archived) cat.archived = true;
-    return cat;
+    const item = { id, name: String(c.name ?? "") };
+    decorate?.(c, item);
+    if (Number.isFinite(c[amountKey])) item[amountKey] = c[amountKey];
+    if (c.archived) item.archived = true;
+    return item;
   });
 }
 
@@ -144,6 +173,7 @@ export function sanitiseOneOffs(list) {
     }));
 }
 
+/** Shared by `spendLog` and `savingsLog` — one month-entry shape, two uses. */
 export function sanitiseLog(log) {
   if (!log || typeof log !== "object") return {};
   const out = {};
