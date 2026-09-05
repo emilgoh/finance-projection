@@ -150,6 +150,29 @@ function sanitiseNamedList(list, amountKey, decorate) {
 }
 
 /**
+ * Move one item of a category or bucket list by one visible place. Archived
+ * items are not on screen, so they are stepped over rather than absorbing the
+ * move and making the button look broken.
+ *
+ * Returns true when something actually moved, so callers can skip a re-render.
+ */
+export function moveItem(list, item, delta) {
+  if (!Array.isArray(list)) return false;
+  const from = list.indexOf(item);
+  const step = delta < 0 ? -1 : 1;
+  if (from < 0 || !delta) return false;
+
+  let to = from + step;
+  while (to >= 0 && to < list.length && list[to]?.archived) to += step;
+  if (to < 0 || to >= list.length) return false;
+
+  // Removing first shifts everything after `from` down one, which is exactly
+  // what makes inserting at `to` land on the far side of the neighbour.
+  list.splice(to, 0, list.splice(from, 1)[0]);
+  return true;
+}
+
+/**
  * Shared by life events and windfalls, which have the same shape: a one-off
  * amount in today's money at a given age. Both reach the projection engine,
  * which ignores a non-finite age but would happily arithmetic on a string

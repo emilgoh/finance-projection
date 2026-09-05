@@ -8,7 +8,7 @@ import {
 import { PAGES, pageFromHash, startRouter } from "./router.js";
 import {
   DEFAULT_STATE, ACCOUNT_TYPES,
-  loadState, writeState, clearState, mergeSaved, newId, backupHint, sanitiseTimestamp,
+  loadState, writeState, clearState, mergeSaved, moveItem, newId, backupHint, sanitiseTimestamp,
 } from "./state.js";
 
 let state = loadState(localStorage);
@@ -241,10 +241,12 @@ const NAMED_LISTS = {
 function renderNamedList(listKey) {
   const cfg = NAMED_LISTS[listKey];
   const list = document.getElementById(cfg.listId);
+  const live = activeCategories(state[listKey]);
   list.textContent = "";
-  for (const item of activeCategories(state[listKey])) {
+  live.forEach((item, position) => {
     const row = document.createElement("div");
     row.className = cfg.kinds ? "budget-row budget-row-kind" : "budget-row";
+    row.dataset.id = item.id;
 
     const name = document.createElement("input");
     name.type = "text";
@@ -253,7 +255,11 @@ function renderNamedList(listKey) {
     name.setAttribute("aria-label", cfg.nameLabel);
     name.addEventListener("input", () => {
       item.name = name.value;
-      remove.setAttribute("aria-label", `Remove ${item.name || cfg.noun}`);
+      const label = item.name || cfg.noun;
+      remove.setAttribute("aria-label", `Remove ${label}`);
+      for (const button of moves.querySelectorAll("[data-move]")) {
+        button.setAttribute("aria-label", `Move ${label} ${button.dataset.move}`);
+      }
       saveState();
       renderLog(); // the log labels rows by name; keep them in step
     });
@@ -281,11 +287,57 @@ function renderNamedList(listKey) {
     remove.setAttribute("aria-label", `Remove ${item.name || cfg.noun}`);
     remove.addEventListener("click", () => removeNamedItem(listKey, item));
 
-    if (cfg.kinds) row.append(name, kindSelect(listKey, item), amount, remove);
-    else row.append(name, amount, remove);
+    const moves = moveButtons(listKey, item, position, live.length);
+    if (cfg.kinds) row.append(name, kindSelect(listKey, item), amount, moves, remove);
+    else row.append(name, amount, moves, remove);
     list.append(row);
-  }
+  });
   cfg.render();
+}
+
+/**
+ * Order is the user's own: the list they read it in, and the order the month
+ * log lists its rows in. Two buttons rather than drag and drop — a swap is the
+ * whole gesture, it works from the keyboard without a story about drop targets,
+ * and it needs no library in a project that has none.
+ */
+function moveButtons(listKey, item, position, count) {
+  const wrap = document.createElement("div");
+  wrap.className = "row-moves";
+  for (const [dir, delta, glyph] of [["up", -1, "\u2191"], ["down", 1, "\u2193"]]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "row-move";
+    button.dataset.move = dir;
+    button.textContent = glyph;
+    button.disabled = dir === "up" ? position === 0 : position === count - 1;
+    button.setAttribute("aria-label", `Move ${item.name || NAMED_LISTS[listKey].noun} ${dir}`);
+    button.addEventListener("click", () => moveNamedItem(listKey, item, delta));
+    wrap.append(button);
+  }
+  return wrap;
+}
+
+function moveNamedItem(listKey, item, delta) {
+  if (!moveItem(state[listKey], item, delta)) return;
+  saveState();
+  renderNamedList(listKey);
+  renderLog(); // the log lists its rows in this order too
+  focusMoveButton(listKey, item, delta);
+}
+
+/**
+ * Keep the keyboard on the button just pressed, so a row can be walked several
+ * places in one go. At either end that button is now disabled and cannot hold
+ * focus, so the other one takes it.
+ */
+function focusMoveButton(listKey, item, delta) {
+  const row = document.querySelector(
+    `#${NAMED_LISTS[listKey].listId} [data-id="${CSS.escape(item.id)}"]`);
+  if (!row) return;
+  const pressed = row.querySelector(`[data-move="${delta < 0 ? "up" : "down"}"]`);
+  const other = row.querySelector(`[data-move="${delta < 0 ? "down" : "up"}"]`);
+  (pressed && !pressed.disabled ? pressed : other)?.focus();
 }
 
 function kindSelect(listKey, cat) {

@@ -68,14 +68,15 @@ the URL hash — `#/projection` and `#/tracker`, so either can be bookmarked.
 - **Spending categories** — optionally split your spending, with a budget
   against each category and a fixed/variable mark on it. Fixed is the same bill
   every month — rent, insurance, loans; variable is what you decide each month.
-  Leave it empty to log a single total.
+  Leave it empty to log a single total. The ↑/↓ buttons reorder a row, and the
+  month log lists its rows in the order you choose.
 - **Monthly spending log** — log what you actually spent each month, split by
   those categories, and see it against your budget. Overspend shows as `+`, an
   underspend as `−`. Once anything is marked fixed the log groups itself into
   fixed and variable, each with its own subtotal.
 - **Savings buckets and log** — where the money you keep actually goes
   (emergency fund, brokerage, a specific goal), with an optional monthly target
-  each, logged the same way. Here `+` is ahead of target and `−` is short of it.
+  each, reorderable the same way, logged the same way. Here `+` is ahead of target and `−` is short of it.
   A line under the two logs gives the month's savings rate as a share of what
   you logged.
 - **Forecast from your actuals** — a checkbox swaps the projection's spending

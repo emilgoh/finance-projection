@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   STORAGE_KEY, LEGACY_STORAGE_KEY, DEFAULT_STATE, ACCOUNT_TYPES,
   loadState, writeState, clearState, mergeSaved,
-  sanitiseAccounts, sanitiseCategories, sanitiseSavingsBuckets, sanitiseLog, newId,
+  sanitiseAccounts, sanitiseCategories, sanitiseSavingsBuckets, sanitiseLog, moveItem, newId,
   sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS, sanitiseOneOffs,
 } from "../js/state.js";
 
@@ -453,4 +453,59 @@ test("the two logs stay independent — one cannot leak ids into the other", () 
   });
   assert.deepEqual(Object.keys(merged.spendLog["2026-06"].byCategory), ["c1"]);
   assert.deepEqual(Object.keys(merged.savingsLog["2026-06"].byCategory), ["b1"]);
+});
+
+/* ---------- reordering ---------- */
+
+const named = (...names) => names.map((n) => (n.endsWith("*")
+  ? { id: n, name: n.slice(0, -1), archived: true }
+  : { id: n, name: n }));
+const order = (list) => list.map((c) => c.name);
+
+test("moveItem swaps with the neighbour in both directions", () => {
+  const list = named("A", "B", "C");
+  assert.equal(moveItem(list, list[2], -1), true);
+  assert.deepEqual(order(list), ["A", "C", "B"]);
+  assert.equal(moveItem(list, list[0], 1), true);
+  assert.deepEqual(order(list), ["C", "A", "B"]);
+});
+
+test("moveItem steps over archived items, which are not on screen", () => {
+  const list = named("A", "X*", "B");
+  assert.equal(moveItem(list, list[0], 1), true);
+  assert.deepEqual(order(list.filter((c) => !c.archived)), ["B", "A"]);
+
+  const back = named("A", "X*", "B");
+  assert.equal(moveItem(back, back[2], -1), true);
+  assert.deepEqual(order(back.filter((c) => !c.archived)), ["B", "A"]);
+});
+
+test("moveItem refuses to move off either end, and says so", () => {
+  const list = named("A", "B");
+  assert.equal(moveItem(list, list[0], -1), false);
+  assert.equal(moveItem(list, list[1], 1), false);
+  assert.deepEqual(order(list), ["A", "B"], "a refused move changes nothing");
+});
+
+test("moveItem refuses when only archived items lie beyond", () => {
+  const list = named("X*", "A");
+  assert.equal(moveItem(list, list[1], -1), false);
+  assert.deepEqual(list.map((c) => c.id), ["X*", "A"]);
+});
+
+test("moveItem ignores an unknown item, a zero step and a non-list", () => {
+  const list = named("A", "B");
+  assert.equal(moveItem(list, { id: "ghost" }, 1), false);
+  assert.equal(moveItem(list, list[0], 0), false);
+  assert.equal(moveItem(null, list[0], 1), false);
+  assert.deepEqual(order(list), ["A", "B"]);
+});
+
+test("a reordered list survives the storage round trip in its new order", () => {
+  const storage = fakeStorage();
+  const state = loadState(storage);
+  state.spendCategories = sanitiseCategories(named("Rent", "Food", "Transport"));
+  moveItem(state.spendCategories, state.spendCategories[2], -1);
+  writeState(storage, state);
+  assert.deepEqual(order(loadState(storage).spendCategories), ["Rent", "Transport", "Food"]);
 });

@@ -134,6 +134,11 @@ These read like bugs and are not.
   by design. The spending log's actuals checkbox is the one exception, and it
   replaces a single input rather than adding a second source of truth.
 
+- **Reordering moves a row one visible place, not one array index.** Archived
+  categories still sit in the list and are not on screen, so a move steps over
+  them; letting one absorb a press would look like a broken button. `moveItem()`
+  lives in `js/state.js` rather than `js/app.js` so that rule has a test.
+
 - **The fixed/variable split is presentational.** It groups the log and gives
   each group a subtotal. No total, no average and no forecast changes because of
   it — a category's kind is a label on the row, not an input to any arithmetic.

@@ -243,11 +243,24 @@ input:focus-visible, select:focus-visible, button:focus-visible, .chart-region:f
 .budget-list { display: flex; flex-direction: column; gap: 8px; max-width: 540px; }
 .budget-row {
   display: grid;
-  grid-template-columns: 1.4fr 1fr auto;
+  grid-template-columns: 1.4fr 1fr auto auto;
   gap: 8px;
   align-items: center;
 }
-.budget-row-kind { grid-template-columns: 1.4fr 0.9fr 1fr auto; }
+.row-moves { display: flex; gap: 4px; }
+.row-move {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 28px; height: 34px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.row-move:hover:not(:disabled) { color: var(--text-primary); border-color: var(--text-muted); }
+.row-move:disabled { opacity: 0.35; cursor: default; }
+.budget-row-kind { grid-template-columns: 1.4fr 0.9fr 1fr auto auto; }
 .budget-row input, .budget-row select {
   background: var(--page);
   color: var(--text-primary);
@@ -327,7 +340,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, .chart-region:f
 .forecast-hint { margin: 8px 0 0; font-size: 0.8rem; color: var(--text-muted); }
 
 @media (max-width: 560px) {
-  .budget-row, .budget-row-kind { grid-template-columns: 1fr 1fr auto; }
+  .budget-row, .budget-row-kind { grid-template-columns: 1fr 1fr auto auto; }
   .budget-row input[type="text"] { grid-column: 1 / -1; }
   .log-row {
     grid-template-columns: 1fr auto;
