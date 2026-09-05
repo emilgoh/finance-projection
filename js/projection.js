@@ -93,16 +93,10 @@ export function project(p) {
 
   // One-off life events (wedding, home down payment…): amounts in today's
   // money, spent from liquid savings in the year the given age is reached.
-  const eventsByAge = new Map();
-  if (Array.isArray(p.events)) {
-    for (const e of p.events) {
-      const eventAge = num(e.age, NaN);
-      const amount = num(e.amount, 0);
-      if (Number.isFinite(eventAge) && amount) {
-        eventsByAge.set(eventAge, (eventsByAge.get(eventAge) || 0) + amount);
-      }
-    }
-  }
+  const eventsByAge = sumByAge(p.events);
+  // One-off windfalls (bonus, inheritance, sale of an asset): the mirror
+  // image — today's money paid into liquid savings at the given age.
+  const windfallsByAge = sumByAge(p.windfalls);
 
   const taxOn = !!p.includeTax;
   const cpfOn = !!(p.cpf && p.cpf.enabled);
@@ -170,6 +164,8 @@ export function project(p) {
         cashFlow = annualPayout - retirementSpendToday * deflator;
       }
       cashFlow -= (eventsByAge.get(age) || 0) * deflator;
+      // Untaxed and outside CPF: a windfall lands straight in savings.
+      cashFlow += (windfallsByAge.get(age) || 0) * deflator;
 
       const liquidBefore = liquid;
       liquid += growth + cashFlow;
@@ -231,6 +227,22 @@ export function project(p) {
     cpfEnabled: cpfOn,
     cpfLifePayoutAnnual: annualPayout,
   };
+}
+
+/**
+ * Collapses a list of one-off `{ age, amount }` entries into age → total, so
+ * several landing in the same year add up. Entries without a usable age are
+ * dropped: the engine has no year to apply them in.
+ */
+function sumByAge(list) {
+  const byAge = new Map();
+  if (!Array.isArray(list)) return byAge;
+  for (const e of list) {
+    const age = num(e.age, NaN);
+    const amount = num(e.amount, 0);
+    if (Number.isFinite(age) && amount) byAge.set(age, (byAge.get(age) || 0) + amount);
+  }
+  return byAge;
 }
 
 function num(v, fallback) {

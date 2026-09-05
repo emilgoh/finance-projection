@@ -66,10 +66,19 @@ the URL hash — `#/projection` and `#/tracker`, so either can be bookmarked.
 ### Monthly tracker
 
 - **Spending categories** — optionally split your spending, with a budget
-  against each category. Leave it empty to log a single total each month.
+  against each category and a fixed/variable mark on it. Fixed is the same bill
+  every month — rent, insurance, loans; variable is what you decide each month.
+  Leave it empty to log a single total. The ↑/↓ buttons reorder a row, and the
+  month log lists its rows in the order you choose.
 - **Monthly spending log** — log what you actually spent each month, split by
   those categories, and see it against your budget. Overspend shows as `+`, an
-  underspend as `−`.
+  underspend as `−`. Once anything is marked fixed the log groups itself into
+  fixed and variable, each with its own subtotal.
+- **Savings buckets and log** — where the money you keep actually goes
+  (emergency fund, brokerage, a specific goal), with an optional monthly target
+  each, reorderable the same way, logged the same way. Here `+` is ahead of target and `−` is short of it.
+  A line under the two logs gives the month's savings rate as a share of what
+  you logged.
 - **Forecast from your actuals** — a checkbox swaps the projection's spending
   assumption from the figure in your plan to the average of every month you have
   logged. Until a completed month exists it falls back to the plan figure and
@@ -100,6 +109,12 @@ Annual steps, deliberately simple:
   entered in today's money at a given age; each is inflated to that year and
   spent from liquid savings when it lands. A large enough one in retirement can
   deplete savings.
+- One-off **windfalls** (bonus, inheritance, sale of a car or a property) are
+  the mirror image: entered the same way, inflated the same way, but paid into
+  liquid savings. They are treated as untaxed and outside CPF, which is right
+  for gifts, inheritance and asset sales in Singapore — a cash bonus from an
+  employer would really attract both, so model that by raising your income
+  instead if it matters.
 - "Today's money" divides nominal values by cumulative inflation.
 - Financial independence is measured against assets *outside* CPF, since CPF is
   locked until the payout age.
@@ -152,12 +167,12 @@ CPF parameters (in `js/projection.js`) are based on:
 index.html            page structure
 styles.css            theme (light/dark), layout, chart chrome
 js/projection.js      pure projection engine (no DOM)
-js/expenses.js        pure month/variance/average helpers (no DOM)
+js/expenses.js        pure month/variance/average helpers, spending and savings (no DOM)
 js/state.js           state shape, persistence, sanitising (no DOM)
 js/router.js          hash routing between the two pages (no DOM)
 js/chart.js           interactive SVG chart renderer
-js/app.js             inputs, spending log, tiles, table — the DOM layer
-tests/                engine, spending-log, state and router tests
+js/app.js             inputs, monthly logs, tiles, table — the DOM layer
+tests/                engine, monthly-log, state and router tests
 serve.py              dev server with caching disabled
 setup.sh              provisions the local toolchain (venv + Node)
 docs/TODO.md          known gaps, deferred work, and decisions made on purpose

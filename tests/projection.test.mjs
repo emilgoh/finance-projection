@@ -227,6 +227,64 @@ test("events: a big retirement expense can deplete savings", () => {
   assert.equal(hit.depletedAge, 80);
 });
 
+/* ---------- windfalls ---------- */
+
+test("windfalls: paid in the right year, inflated from today's money", () => {
+  const plain = project(base);
+  const withWindfall = project({
+    ...base,
+    windfalls: [{ name: "inheritance", age: 35, amount: 50000 }],
+  });
+  const t = 5; // age 35
+  const gain = 50000 * 1.025 ** t;
+  assert.equal(withWindfall.rows[t - 1].nominal, plain.rows[t - 1].nominal);
+  assert.ok(Math.abs((withWindfall.rows[t].nominal - plain.rows[t].nominal) - gain) < 1e-6);
+});
+
+test("windfalls: several in one year add up; out-of-range ages are ignored", () => {
+  const doubled = project({
+    ...base,
+    windfalls: [
+      { name: "a", age: 35, amount: 20000 },
+      { name: "b", age: 35, amount: 30000 },
+      { name: "too early", age: 30, amount: 99999 }, // current age: no year to land in
+      { name: "too late", age: 200, amount: 99999 },
+    ],
+  });
+  const single = project({
+    ...base,
+    windfalls: [{ name: "inheritance", age: 35, amount: 50000 }],
+  });
+  assert.deepEqual(
+    doubled.rows.map((r) => r.nominal),
+    single.rows.map((r) => r.nominal),
+  );
+});
+
+test("windfalls: an equal event in the same year cancels it out", () => {
+  const both = project({
+    ...base,
+    events: [{ name: "wedding", age: 40, amount: 80000 }],
+    windfalls: [{ name: "gift", age: 40, amount: 80000 }],
+  });
+  assert.deepEqual(both.rows.map((r) => r.nominal), project(base).rows.map((r) => r.nominal));
+});
+
+test("windfalls: untaxed and outside CPF, whatever the toggles say", () => {
+  // The whole windfall reaches liquid savings: no CPF share, no tax bracket.
+  const taxed = { ...base, includeTax: true, cpf: { enabled: true, oa: 0, sa: 0, ma: 0 } };
+  const plain = project(taxed);
+  const withWindfall = project({ ...taxed, windfalls: [{ age: 31, amount: 100000 }] });
+  assert.ok(Math.abs((withWindfall.rows[1].liquid - plain.rows[1].liquid) - 100000 * 1.025) < 1e-6);
+});
+
+test("windfalls: one in retirement can undo a depletion", () => {
+  const drained = { ...cpfBase, events: [{ name: "medical", age: 80, amount: 5000000 }] };
+  assert.equal(project(drained).depletedAge, 80);
+  const rescued = project({ ...drained, windfalls: [{ name: "estate", age: 80, amount: 5000000 }] });
+  assert.equal(rescued.depletedAge, null);
+});
+
 /* ---------- Singapore income tax ---------- */
 
 test("tax brackets match IRAS cumulative figures", () => {

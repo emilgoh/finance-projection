@@ -147,14 +147,25 @@
           </p>
         </div>
 
-        <div class="card events-card">
+        <div class="card one-off-card">
           <h2>Life events <small class="h2-hint">(one-off big expenses, today's money)</small></h2>
-          <div id="events-list" class="events-list"></div>
-          <div class="events-footer">
+          <div id="events-list" class="one-off-list"></div>
+          <div class="one-off-footer">
             <button type="button" id="add-event" class="btn">+ Add event</button>
-            <p class="events-hint">Wedding, home down payment, kids' university —
+            <p class="one-off-hint">Wedding, home down payment, kids' university —
               spent from savings in the year you reach that age, adjusted for
               inflation.</p>
+          </div>
+        </div>
+
+        <div class="card one-off-card">
+          <h2>Windfalls <small class="h2-hint">(one-off money in, today's money)</small></h2>
+          <div id="windfalls-list" class="one-off-list"></div>
+          <div class="one-off-footer">
+            <button type="button" id="add-windfall" class="btn">+ Add windfall</button>
+            <p class="one-off-hint">Bonus, inheritance, sale of a car or a
+              property — paid into savings in the year you reach that age,
+              adjusted for inflation. Treated as untaxed and outside CPF.</p>
           </div>
         </div>
       </section>
@@ -194,11 +205,25 @@
         <div class="card budget-card">
           <h2>Spending categories <small class="h2-hint">(optional)</small></h2>
           <p class="card-hint">Split your spending so you can see where it drifts.
-             Leave this empty to just log one total each month.</p>
+             Fixed is the same bill every month — rent, insurance, loans;
+             variable is what you actually decide each month. Leave this empty
+             to just log one total.</p>
           <div id="budget-list" class="budget-list"></div>
           <div class="accounts-footer">
             <button type="button" id="add-category" class="btn">+ Add category</button>
             <p class="accounts-total" id="budget-total-line"></p>
+          </div>
+        </div>
+
+        <div class="card budget-card">
+          <h2>Savings buckets <small class="h2-hint">(optional)</small></h2>
+          <p class="card-hint">Where the money you keep actually goes, and how
+             much you mean to put there each month. Leave this empty to just log
+             one total.</p>
+          <div id="savings-budget-list" class="budget-list"></div>
+          <div class="accounts-footer">
+            <button type="button" id="add-bucket" class="btn">+ Add bucket</button>
+            <p class="accounts-total" id="savings-target-line"></p>
           </div>
         </div>
 
@@ -211,8 +236,15 @@
             </div>
             <button type="button" id="log-today" class="btn-link">This month</button>
           </div>
+          <h3 class="log-subhead">Spending</h3>
           <div id="log-list" class="log-list"></div>
           <p class="log-summary" id="log-summary"></p>
+
+          <h3 class="log-subhead">Savings</h3>
+          <div id="savings-log-list" class="log-list"></div>
+          <p class="log-summary" id="savings-summary"></p>
+          <p class="log-summary" id="log-net"></p>
+
           <div class="log-footer">
             <label class="check-field">
               <input type="checkbox" id="in-useActualsForForecast">

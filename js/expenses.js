@@ -11,9 +11,23 @@
  *
  * Categories are optional: the plan's `monthlyExpenses` stays the budget of
  * record, and a category's own `budget` only drives its own variance row.
+ *
+ * Every category is either fixed (rent, insurance — the same bill each month)
+ * or variable (groceries, going out). The split is presentational: it groups
+ * the log and gives each group a subtotal, and changes no total and no average.
+ *
+ * The savings log reuses the month-entry shape exactly, with buckets standing
+ * in for categories and a `target` standing in for a `budget`, so every helper
+ * here works on both. The one thing that does not carry over is the reading of
+ * the sign: an overspend is bad, but saving more than the target is good, and
+ * that judgement belongs to whatever renders the number.
  */
 
 export const OTHER_ID = "__other__";
+
+export const KINDS = ["fixed", "variable"];
+
+export const KIND_LABELS = { fixed: "Fixed", variable: "Variable" };
 
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -57,9 +71,29 @@ export function activeCategories(categories) {
   return (Array.isArray(categories) ? categories : []).filter((c) => c && !c.archived);
 }
 
-/** Sum of the active categories' own budgets. */
-export function categoryBudgetTotal(categories) {
-  return activeCategories(categories).reduce((sum, c) => sum + num(c.budget, 0), 0);
+/**
+ * A category's kind, defaulting to variable. Anything unrecognised — an old
+ * blob written before the split, a hostile import — reads as variable rather
+ * than being dropped: guessing "fixed" would understate what can be cut.
+ */
+export function categoryKind(cat) {
+  return cat?.kind === "fixed" ? "fixed" : "variable";
+}
+
+/** Active categories of one kind, in their original order. */
+export function categoriesOfKind(categories, kind) {
+  return activeCategories(categories).filter((c) => categoryKind(c) === kind);
+}
+
+/** Sum of the active categories' own budgets; one kind only when asked. */
+export function categoryBudgetTotal(categories, kind) {
+  const list = kind ? categoriesOfKind(categories, kind) : activeCategories(categories);
+  return list.reduce((sum, c) => sum + num(c.budget, 0), 0);
+}
+
+/** Sum of the active savings buckets' monthly targets. */
+export function bucketTargetTotal(buckets) {
+  return activeCategories(buckets).reduce((sum, b) => sum + num(b.target, 0), 0);
 }
 
 /* ---------- the log ---------- */
@@ -99,19 +133,90 @@ export function loggedMonths(spendLog) {
  * the sum of the category budgets.
  */
 export function monthVariance(spendLog, key, categories, monthlyExpenses) {
-  const entry = spendLog?.[key];
   const logged = isLogged(spendLog, key);
+  const rows = varianceRows(spendLog?.[key], logged, categories, {
+    plannedKey: "budget", otherLabel: "Other", unknownLabel: "Uncategorised",
+  });
+  const actual = logged ? monthTotal(spendLog[key]) : null;
+  const budget = num(monthlyExpenses, 0);
+  return {
+    rows,
+    total: { budget, actual, variance: logged ? actual - budget : null },
+    logged,
+  };
+}
+
+/**
+ * The same month, split into fixed and variable groups with a subtotal each.
+ * Every row of `monthVariance` appears in exactly one group, and the returned
+ * `total` is still the whole month — the grouping is a lens, not a filter.
+ *
+ * "Other" and any orphaned id whose category is gone land under variable:
+ * nothing left standing says they were a fixed commitment, and variable is the
+ * assumption that overstates rather than understates what could be cut.
+ *
+ * A subtotal's `budget` counts only the rows in that group that set one, so a
+ * group holding unbudgeted rows reports a variance against a partial budget.
+ * That is the honest reading — the alternative is a subtotal that silently
+ * pretends an unbudgeted row was budgeted at zero.
+ */
+export function monthSections(spendLog, key, categories, monthlyExpenses) {
+  const result = monthVariance(spendLog, key, categories, monthlyExpenses);
+  const kindById = new Map(
+    (Array.isArray(categories) ? categories : [])
+      .filter((c) => c && typeof c === "object")
+      .map((c) => [c.id, categoryKind(c)]),
+  );
+  const sections = KINDS.map((kind) => ({ kind, label: KIND_LABELS[kind], rows: [] }));
+  const byKind = new Map(sections.map((s) => [s.kind, s]));
+  for (const r of result.rows) {
+    const kind = r.id === OTHER_ID ? "variable" : kindById.get(r.id) || "variable";
+    byKind.get(kind).rows.push(r);
+  }
+  for (const section of sections) section.subtotal = subtotal(section.rows, result.logged);
+  return { ...result, sections };
+}
+
+/**
+ * One month of savings, actual against target. Buckets are categories in every
+ * way that matters here, so the rows come out in the same shape — `budget` on a
+ * row is that bucket's monthly target.
+ *
+ * `total.target` is the sum of the active buckets' targets. There is no
+ * plan-level savings figure to be the number of record, unlike spending, where
+ * `monthlyExpenses` is.
+ */
+export function savingsVariance(savingsLog, key, buckets) {
+  const logged = isLogged(savingsLog, key);
+  const rows = varianceRows(savingsLog?.[key], logged, buckets, {
+    plannedKey: "target", otherLabel: "Unallocated", unknownLabel: "Unassigned",
+  });
+  const actual = logged ? monthTotal(savingsLog[key]) : null;
+  const target = bucketTargetTotal(buckets);
+  return {
+    rows,
+    total: { target, actual, variance: logged ? actual - target : null },
+    logged,
+  };
+}
+
+/**
+ * Shared by spending and savings. `items` are categories or buckets; the
+ * planned amount is read from `plannedKey` and always lands on the row as
+ * `budget`, so one renderer covers both.
+ */
+function varianceRows(entry, logged, items, { plannedKey, otherLabel, unknownLabel }) {
   const byCategory = entry?.byCategory || {};
-  const all = Array.isArray(categories) ? categories : [];
+  const all = Array.isArray(items) ? items : [];
   const rows = [];
   const seen = new Set();
 
-  for (const cat of activeCategories(all)) {
-    seen.add(cat.id);
-    const budget = Number.isFinite(cat.budget) ? cat.budget : null;
+  for (const item of activeCategories(all)) {
+    seen.add(item.id);
+    const planned = Number.isFinite(item[plannedKey]) ? item[plannedKey] : null;
     // An unlogged month means "unknown", not "spent nothing".
-    const actual = logged ? num(byCategory[cat.id], 0) : null;
-    rows.push(row(cat.id, cat.name || "Untitled", false, budget, actual));
+    const actual = logged ? num(byCategory[item.id], 0) : null;
+    rows.push(row(item.id, item.name || "Untitled", false, planned, actual));
   }
 
   // Archived or deleted categories keep their history visible.
@@ -120,19 +225,22 @@ export function monthVariance(spendLog, key, categories, monthlyExpenses) {
     const amount = num(byCategory[id], 0);
     if (amount === 0) continue;
     const known = all.find((c) => c && c.id === id);
-    rows.push(row(id, known?.name || "Uncategorised", true, null, amount));
+    rows.push(row(id, known?.name || unknownLabel, true, null, amount));
   }
 
-  // Always present, so there is somewhere to put spending that fits no category.
-  const otherActual = logged ? num(entry.other, 0) : null;
-  rows.push(row(OTHER_ID, "Other", false, null, otherActual));
+  // Always present, so there is somewhere to put what fits no category.
+  rows.push(row(OTHER_ID, otherLabel, false, null, logged ? num(entry.other, 0) : null));
+  return rows;
+}
 
-  const actual = logged ? monthTotal(entry) : null;
-  const budget = num(monthlyExpenses, 0);
+function subtotal(rows, logged) {
+  let budget = null;
+  for (const r of rows) if (r.budget !== null) budget = num(budget, 0) + r.budget;
+  const actual = logged ? rows.reduce((sum, r) => sum + num(r.actual, 0), 0) : null;
   return {
-    rows,
-    total: { budget, actual, variance: logged ? actual - budget : null },
-    logged,
+    budget,
+    actual,
+    variance: budget === null || actual === null ? null : actual - budget,
   };
 }
 

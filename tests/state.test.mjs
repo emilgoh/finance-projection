@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {
   STORAGE_KEY, LEGACY_STORAGE_KEY, DEFAULT_STATE, ACCOUNT_TYPES,
   loadState, writeState, clearState, mergeSaved,
-  sanitiseAccounts, sanitiseCategories, sanitiseLog, newId,
-  sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS, sanitiseEvents,
+  sanitiseAccounts, sanitiseCategories, sanitiseSavingsBuckets, sanitiseLog, moveItem, newId,
+  sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS, sanitiseOneOffs,
 } from "../js/state.js";
 
 /** Minimal stand-in for localStorage: same three methods, plain object inside. */
@@ -75,8 +75,10 @@ test("a saved state reloads unchanged — no value is lost or re-sanitised away"
   const storage = fakeStorage();
   const original = loadState(storage);
   original.currentAge = 44;
-  original.spendCategories = [{ id: "c1", name: "Food", budget: 800 }];
+  original.spendCategories = [{ id: "c1", name: "Food", kind: "variable", budget: 800 }];
   original.spendLog = { "2026-06": { byCategory: { c1: 750 }, other: 20 } };
+  original.savingsBuckets = [{ id: "b1", name: "Emergency fund", target: 500 }];
+  original.savingsLog = { "2026-06": { byCategory: { b1: 500 }, other: 100 } };
   original.useActualsForForecast = true;
   writeState(storage, original);
   assert.deepEqual(loadState(storage), original);
@@ -324,14 +326,14 @@ test("mergeSaved: a garbage lastBackupAt cannot render as Invalid Date", () => {
   assert.equal(mergeSaved({ lastBackupAt: iso }).lastBackupAt, iso);
 });
 
-/* ---------- sanitiseEvents ---------- */
+/* ---------- sanitiseOneOffs ---------- */
 
-test("sanitiseEvents: a non-array becomes an empty list", () => {
-  for (const bad of [undefined, null, "x", 7, {}]) assert.deepEqual(sanitiseEvents(bad), []);
+test("sanitiseOneOffs: a non-array becomes an empty list", () => {
+  for (const bad of [undefined, null, "x", 7, {}]) assert.deepEqual(sanitiseOneOffs(bad), []);
 });
 
-test("sanitiseEvents: non-objects are dropped and fields are coerced", () => {
-  const out = sanitiseEvents([
+test("sanitiseOneOffs: non-objects are dropped and fields are coerced", () => {
+  const out = sanitiseOneOffs([
     null,
     "ignored",
     { name: "Wedding", age: 35, amount: 50000 },
@@ -345,19 +347,19 @@ test("sanitiseEvents: non-objects are dropped and fields are coerced", () => {
   assert.deepEqual(out[2], { name: "", age: null, amount: 0 });
 });
 
-test("sanitiseEvents: an unusable age becomes null, never 0", () => {
+test("sanitiseOneOffs: an unusable age becomes null, never 0", () => {
   // 0 would claim to be a real age; null makes the engine skip the row.
-  const out = sanitiseEvents([{ age: NaN }, { age: Infinity }, { age: undefined }]);
+  const out = sanitiseOneOffs([{ age: NaN }, { age: Infinity }, { age: undefined }]);
   for (const e of out) assert.equal(e.age, null);
 });
 
-test("sanitiseEvents: a negative amount becomes 0 rather than income", () => {
-  const out = sanitiseEvents([{ name: "refund", age: 40, amount: -50000 }]);
+test("sanitiseOneOffs: a negative amount becomes 0 rather than income", () => {
+  const out = sanitiseOneOffs([{ name: "refund", age: 40, amount: -50000 }]);
   assert.equal(out[0].amount, 0);
 });
 
-test("sanitiseEvents: age 0 and amount 0 are preserved as given", () => {
-  assert.deepEqual(sanitiseEvents([{ name: "x", age: 0, amount: 0 }]),
+test("sanitiseOneOffs: age 0 and amount 0 are preserved as given", () => {
+  assert.deepEqual(sanitiseOneOffs([{ name: "x", age: 0, amount: 0 }]),
     [{ name: "x", age: 0, amount: 0 }]);
 });
 
@@ -368,10 +370,142 @@ test("mergeSaved: events go through the same funnel as everything else", () => {
     [{ name: "Wedding", age: 35, amount: 50000 }]);
 });
 
+test("mergeSaved: windfalls go through the same funnel as events", () => {
+  assert.deepEqual(mergeSaved({}).windfalls, []);
+  assert.deepEqual(mergeSaved({ windfalls: "nope" }).windfalls, []);
+  assert.deepEqual(mergeSaved({ windfalls: [{ name: "Bonus", age: 35, amount: 20000 }] }).windfalls,
+    [{ name: "Bonus", age: 35, amount: 20000 }]);
+});
+
 test("events survive the storage round trip", () => {
   const storage = fakeStorage();
   const state = loadState(storage);
   state.events = [{ name: "Down payment", age: 34, amount: 200000 }];
   writeState(storage, state);
   assert.deepEqual(loadState(storage), state);
+});
+
+/* ---------- the fixed/variable split and savings ---------- */
+
+test("sanitiseCategories: kind is always written out, defaulting to variable", () => {
+  const out = sanitiseCategories([
+    { id: "a", name: "Rent", kind: "fixed" },
+    { id: "b", name: "Food", kind: "variable" },
+    { id: "c", name: "Legacy" },
+    { id: "d", name: "Hostile", kind: "FIXED" },
+    { id: "e", name: "Worse", kind: { toString: () => "fixed" } },
+  ]);
+  assert.deepEqual(out.map((c) => c.kind),
+    ["fixed", "variable", "variable", "variable", "variable"]);
+});
+
+test("sanitiseSavingsBuckets: a target is kept only when finite, and buckets have no kind", () => {
+  const out = sanitiseSavingsBuckets([
+    { id: "a", name: "Emergency", target: 500 },
+    { id: "b", name: "Zero", target: 0 },
+    { id: "c", name: "String", target: "500" },
+    { id: "d", name: "Gone", target: 200, archived: true },
+  ]);
+  assert.equal(out[0].target, 500);
+  assert.equal(out[1].target, 0, "a zero target is a real target");
+  assert.ok(!("target" in out[2]), "a string target is dropped, not coerced");
+  assert.equal(out[3].archived, true);
+  for (const b of out) assert.ok(!("kind" in b), "buckets are not split fixed/variable");
+});
+
+test("sanitiseSavingsBuckets: duplicate and missing ids are replaced, as for categories", () => {
+  const out = sanitiseSavingsBuckets([{ id: "dup" }, { id: "dup" }, {}]);
+  assert.equal(new Set(out.map((b) => b.id)).size, 3);
+});
+
+test("sanitiseSavingsBuckets: a non-array becomes an empty list", () => {
+  for (const bad of [undefined, null, "x", {}]) assert.deepEqual(sanitiseSavingsBuckets(bad), []);
+});
+
+test("mergeSaved: the savings log passes through the same funnel as the spend log", () => {
+  const merged = mergeSaved({
+    savingsLog: {
+      "2026-06": { byCategory: { b1: 500, bad: -20 }, other: 100 },
+      "not-a-month": { other: 999 },
+      "2026-07": { byCategory: { b1: "500" } },
+    },
+  });
+  assert.deepEqual(Object.keys(merged.savingsLog), ["2026-06"]);
+  assert.deepEqual(merged.savingsLog["2026-06"], { byCategory: { b1: 500 }, other: 100 });
+});
+
+test("mergeSaved: a missing savings key yields empty, never undefined to render against", () => {
+  const merged = mergeSaved({ currentAge: 40 });
+  assert.deepEqual(merged.savingsBuckets, []);
+  assert.deepEqual(merged.savingsLog, {});
+});
+
+test("mergeSaved: a hostile savings blob still produces a loadable state", () => {
+  const merged = mergeSaved({ savingsBuckets: "nope", savingsLog: [1, 2, 3] });
+  assert.deepEqual(merged.savingsBuckets, []);
+  assert.deepEqual(merged.savingsLog, {});
+});
+
+test("the two logs stay independent — one cannot leak ids into the other", () => {
+  const merged = mergeSaved({
+    spendLog: { "2026-06": { byCategory: { c1: 1500 } } },
+    savingsLog: { "2026-06": { byCategory: { b1: 500 } } },
+  });
+  assert.deepEqual(Object.keys(merged.spendLog["2026-06"].byCategory), ["c1"]);
+  assert.deepEqual(Object.keys(merged.savingsLog["2026-06"].byCategory), ["b1"]);
+});
+
+/* ---------- reordering ---------- */
+
+const named = (...names) => names.map((n) => (n.endsWith("*")
+  ? { id: n, name: n.slice(0, -1), archived: true }
+  : { id: n, name: n }));
+const order = (list) => list.map((c) => c.name);
+
+test("moveItem swaps with the neighbour in both directions", () => {
+  const list = named("A", "B", "C");
+  assert.equal(moveItem(list, list[2], -1), true);
+  assert.deepEqual(order(list), ["A", "C", "B"]);
+  assert.equal(moveItem(list, list[0], 1), true);
+  assert.deepEqual(order(list), ["C", "A", "B"]);
+});
+
+test("moveItem steps over archived items, which are not on screen", () => {
+  const list = named("A", "X*", "B");
+  assert.equal(moveItem(list, list[0], 1), true);
+  assert.deepEqual(order(list.filter((c) => !c.archived)), ["B", "A"]);
+
+  const back = named("A", "X*", "B");
+  assert.equal(moveItem(back, back[2], -1), true);
+  assert.deepEqual(order(back.filter((c) => !c.archived)), ["B", "A"]);
+});
+
+test("moveItem refuses to move off either end, and says so", () => {
+  const list = named("A", "B");
+  assert.equal(moveItem(list, list[0], -1), false);
+  assert.equal(moveItem(list, list[1], 1), false);
+  assert.deepEqual(order(list), ["A", "B"], "a refused move changes nothing");
+});
+
+test("moveItem refuses when only archived items lie beyond", () => {
+  const list = named("X*", "A");
+  assert.equal(moveItem(list, list[1], -1), false);
+  assert.deepEqual(list.map((c) => c.id), ["X*", "A"]);
+});
+
+test("moveItem ignores an unknown item, a zero step and a non-list", () => {
+  const list = named("A", "B");
+  assert.equal(moveItem(list, { id: "ghost" }, 1), false);
+  assert.equal(moveItem(list, list[0], 0), false);
+  assert.equal(moveItem(null, list[0], 1), false);
+  assert.deepEqual(order(list), ["A", "B"]);
+});
+
+test("a reordered list survives the storage round trip in its new order", () => {
+  const storage = fakeStorage();
+  const state = loadState(storage);
+  state.spendCategories = sanitiseCategories(named("Rent", "Food", "Transport"));
+  moveItem(state.spendCategories, state.spendCategories[2], -1);
+  writeState(storage, state);
+  assert.deepEqual(order(loadState(storage).spendCategories), ["Rent", "Transport", "Food"]);
 });

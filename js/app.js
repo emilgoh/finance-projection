@@ -2,13 +2,13 @@ import { project, CPF, TAX } from "./projection.js";
 import { renderChart } from "./chart.js";
 import {
   OTHER_ID, monthKey, addMonths, formatMonth,
-  activeCategories, categoryBudgetTotal,
-  isLogged, loggedMonths, monthVariance, effectiveExpenses,
+  activeCategories, categoryKind, categoriesOfKind, categoryBudgetTotal, bucketTargetTotal,
+  isLogged, loggedMonths, monthSections, savingsVariance, effectiveExpenses,
 } from "./expenses.js";
 import { PAGES, pageFromHash, startRouter } from "./router.js";
 import {
   DEFAULT_STATE, ACCOUNT_TYPES,
-  loadState, writeState, clearState, mergeSaved, newId, backupHint, sanitiseTimestamp,
+  loadState, writeState, clearState, mergeSaved, moveItem, newId, backupHint, sanitiseTimestamp,
 } from "./state.js";
 
 let state = loadState(localStorage);
@@ -85,7 +85,8 @@ function bindPlanInputs() {
     saveState();
     recompute();
     renderAccounts();
-    renderBudget();
+    renderNamedList("spendCategories");
+    renderNamedList("savingsBuckets");
     renderLog();
   });
 }
@@ -215,70 +216,168 @@ function updateAccountsTotal() {
 }
 
 
-/* ---------- spending categories ---------- */
-function renderBudget() {
-  const list = document.getElementById("budget-list");
+/* ---------- spending categories & savings buckets ---------- */
+/**
+ * A category and a savings bucket are the same row with a different middle: a
+ * category picks fixed or variable and carries a budget, a bucket only carries
+ * a monthly target. Both key their own month log by id, so both archive rather
+ * than delete once there is history behind them.
+ */
+const NAMED_LISTS = {
+  spendCategories: {
+    listId: "budget-list", logKey: "spendLog", noun: "category", kinds: true,
+    nameLabel: "Category name", namePlaceholder: "Category name",
+    amountKey: "budget", amountLabel: "Monthly budget", amountPlaceholder: "Budget",
+    render: () => updateBudgetTotal(),
+  },
+  savingsBuckets: {
+    listId: "savings-budget-list", logKey: "savingsLog", noun: "bucket", kinds: false,
+    nameLabel: "Bucket name", namePlaceholder: "Bucket (e.g. Emergency fund)",
+    amountKey: "target", amountLabel: "Monthly target", amountPlaceholder: "Target",
+    render: () => updateSavingsTargetTotal(),
+  },
+};
+
+function renderNamedList(listKey) {
+  const cfg = NAMED_LISTS[listKey];
+  const list = document.getElementById(cfg.listId);
+  const live = activeCategories(state[listKey]);
   list.textContent = "";
-  for (const cat of activeCategories(state.spendCategories)) {
+  live.forEach((item, position) => {
     const row = document.createElement("div");
-    row.className = "budget-row";
+    row.className = cfg.kinds ? "budget-row budget-row-kind" : "budget-row";
+    row.dataset.id = item.id;
 
     const name = document.createElement("input");
     name.type = "text";
-    name.value = cat.name;
-    name.placeholder = "Category name";
-    name.setAttribute("aria-label", "Category name");
+    name.value = item.name;
+    name.placeholder = cfg.namePlaceholder;
+    name.setAttribute("aria-label", cfg.nameLabel);
     name.addEventListener("input", () => {
-      cat.name = name.value;
+      item.name = name.value;
+      const label = item.name || cfg.noun;
+      remove.setAttribute("aria-label", `Remove ${label}`);
+      for (const button of moves.querySelectorAll("[data-move]")) {
+        button.setAttribute("aria-label", `Move ${label} ${button.dataset.move}`);
+      }
       saveState();
-      renderLog(); // the log labels rows by category name; keep them in step
+      renderLog(); // the log labels rows by name; keep them in step
     });
 
-    const budget = document.createElement("input");
-    budget.type = "number";
-    budget.min = "0";
-    budget.step = "50";
-    budget.value = Number.isFinite(cat.budget) ? cat.budget : "";
-    budget.placeholder = "Budget";
-    budget.setAttribute("aria-label", `Monthly budget in ${state.currency}`);
-    budget.addEventListener("input", () => {
-      const v = parseFloat(budget.value);
-      if (Number.isFinite(v)) cat.budget = v;
-      else delete cat.budget;
+    const amount = document.createElement("input");
+    amount.type = "number";
+    amount.min = "0";
+    amount.step = "50";
+    amount.value = Number.isFinite(item[cfg.amountKey]) ? item[cfg.amountKey] : "";
+    amount.placeholder = cfg.amountPlaceholder;
+    amount.setAttribute("aria-label", `${cfg.amountLabel} in ${state.currency}`);
+    amount.addEventListener("input", () => {
+      const v = parseFloat(amount.value);
+      if (Number.isFinite(v)) item[cfg.amountKey] = v;
+      else delete item[cfg.amountKey];
       saveState();
-      updateBudgetTotal();
+      cfg.render();
       renderLog();
     });
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "account-remove";
-    remove.textContent = "×";
-    remove.setAttribute("aria-label", `Remove ${cat.name || "category"}`);
-    remove.addEventListener("click", () => removeCategory(cat));
+    remove.textContent = "\u00d7";
+    remove.setAttribute("aria-label", `Remove ${item.name || cfg.noun}`);
+    remove.addEventListener("click", () => removeNamedItem(listKey, item));
 
-    row.append(name, budget, remove);
+    const moves = moveButtons(listKey, item, position, live.length);
+    if (cfg.kinds) row.append(name, kindSelect(listKey, item), amount, moves, remove);
+    else row.append(name, amount, moves, remove);
     list.append(row);
-  }
-  updateBudgetTotal();
+  });
+  cfg.render();
 }
 
 /**
- * Categories with logged history are archived rather than deleted, so past
- * months keep their names and their totals never shift under the user.
+ * Order is the user's own: the list they read it in, and the order the month
+ * log lists its rows in. Two buttons rather than drag and drop — a swap is the
+ * whole gesture, it works from the keyboard without a story about drop targets,
+ * and it needs no library in a project that has none.
  */
-function removeCategory(cat) {
-  const logged = Object.values(state.spendLog).some((e) => Number.isFinite(e.byCategory?.[cat.id]));
+function moveButtons(listKey, item, position, count) {
+  const wrap = document.createElement("div");
+  wrap.className = "row-moves";
+  for (const [dir, delta, glyph] of [["up", -1, "\u2191"], ["down", 1, "\u2193"]]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "row-move";
+    button.dataset.move = dir;
+    button.textContent = glyph;
+    button.disabled = dir === "up" ? position === 0 : position === count - 1;
+    button.setAttribute("aria-label", `Move ${item.name || NAMED_LISTS[listKey].noun} ${dir}`);
+    button.addEventListener("click", () => moveNamedItem(listKey, item, delta));
+    wrap.append(button);
+  }
+  return wrap;
+}
+
+function moveNamedItem(listKey, item, delta) {
+  if (!moveItem(state[listKey], item, delta)) return;
+  saveState();
+  renderNamedList(listKey);
+  renderLog(); // the log lists its rows in this order too
+  focusMoveButton(listKey, item, delta);
+}
+
+/**
+ * Keep the keyboard on the button just pressed, so a row can be walked several
+ * places in one go. At either end that button is now disabled and cannot hold
+ * focus, so the other one takes it.
+ */
+function focusMoveButton(listKey, item, delta) {
+  const row = document.querySelector(
+    `#${NAMED_LISTS[listKey].listId} [data-id="${CSS.escape(item.id)}"]`);
+  if (!row) return;
+  const pressed = row.querySelector(`[data-move="${delta < 0 ? "up" : "down"}"]`);
+  const other = row.querySelector(`[data-move="${delta < 0 ? "down" : "up"}"]`);
+  (pressed && !pressed.disabled ? pressed : other)?.focus();
+}
+
+function kindSelect(listKey, cat) {
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "Fixed or variable");
+  for (const [value, label] of [["fixed", "Fixed"], ["variable", "Variable"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+  }
+  // Read through categoryKind, so a blob written before the split — or an
+  // import carrying something else entirely — still selects a real option.
+  select.value = categoryKind(cat);
+  select.addEventListener("change", () => {
+    cat.kind = select.value === "fixed" ? "fixed" : "variable";
+    saveState();
+    updateBudgetTotal();
+    renderLog(); // the log groups rows by kind
+  });
+  return select;
+}
+
+/**
+ * Items with logged history are archived rather than deleted, so past months
+ * keep their names and their totals never shift under the user.
+ */
+function removeNamedItem(listKey, item) {
+  const cfg = NAMED_LISTS[listKey];
+  const logged = Object.values(state[cfg.logKey]).some((e) => Number.isFinite(e.byCategory?.[item.id]));
   if (logged) {
-    const label = cat.name || "this category";
-    if (!confirm(`${label} has spending logged against it. Remove it from the list but keep that history?`)) return;
-    cat.archived = true;
+    const label = item.name || `this ${cfg.noun}`;
+    if (!confirm(`${label} has amounts logged against it. Remove it from the list but keep that history?`)) return;
+    item.archived = true;
   } else {
-    const i = state.spendCategories.indexOf(cat);
-    if (i >= 0) state.spendCategories.splice(i, 1);
+    const i = state[listKey].indexOf(item);
+    if (i >= 0) state[listKey].splice(i, 1);
   }
   saveState();
-  renderBudget();
+  renderNamedList(listKey);
   renderLog();
 }
 
@@ -289,35 +388,65 @@ function updateBudgetTotal() {
     line.textContent = "";
     return;
   }
-  const total = categoryBudgetTotal(state.spendCategories);
-  let text = `Categories add up to ${fmtFull(total)} / month`;
+  const fixed = categoryBudgetTotal(state.spendCategories, "fixed");
+  const variable = categoryBudgetTotal(state.spendCategories, "variable");
+  let text = `Categories add up to ${fmtFull(fixed + variable)} / month`;
+  // The split is only worth spelling out once something has been marked fixed.
+  if (categoriesOfKind(state.spendCategories, "fixed").length > 0) {
+    text += ` (${fmtFull(fixed)} fixed · ${fmtFull(variable)} variable)`;
+  }
   // The two figures are allowed to disagree — the plan figure is what forecasts.
-  if (Math.abs(total - state.monthlyExpenses) >= 1) text += ` · your plan says ${fmtFull(state.monthlyExpenses)}`;
+  if (Math.abs(fixed + variable - state.monthlyExpenses) >= 1) {
+    text += ` · your plan says ${fmtFull(state.monthlyExpenses)}`;
+  }
   line.textContent = text;
 }
 
-/* ---------- life events ---------- */
+function updateSavingsTargetTotal() {
+  const line = document.getElementById("savings-target-line");
+  const buckets = activeCategories(state.savingsBuckets);
+  line.textContent = buckets.length === 0
+    ? ""
+    : `Targets add up to ${fmtFull(bucketTargetTotal(state.savingsBuckets))} / month`;
+}
+
+/* ---------- life events & windfalls ---------- */
 
 /**
- * One-off big expenses in today's money. The engine inflates each to the year
+ * Life events (money out) and windfalls (money in) are the same row: a name,
+ * an age, and an amount in today's money. The engine inflates each to the year
  * the age is reached, so what is typed here stays comparable to the plan
- * figures above it.
+ * figures above it. Only the wording and which list is mutated differ.
  */
-function renderEvents() {
-  const list = document.getElementById("events-list");
+const ONE_OFF_LISTS = {
+  events: {
+    listId: "events-list",
+    noun: "event",
+    placeholder: "Event (e.g. home down payment)",
+  },
+  windfalls: {
+    listId: "windfalls-list",
+    noun: "windfall",
+    placeholder: "Windfall (e.g. inheritance)",
+  },
+};
+
+function renderOneOffs(kind) {
+  const { listId, noun, placeholder } = ONE_OFF_LISTS[kind];
+  const list = document.getElementById(listId);
   list.textContent = "";
-  for (const event of state.events) {
+  for (const entry of state[kind]) {
     const row = document.createElement("div");
-    row.className = "event-row";
+    row.className = "one-off-row";
 
     const name = document.createElement("input");
     name.type = "text";
-    name.value = event.name;
-    name.placeholder = "Event (e.g. home down payment)";
-    name.setAttribute("aria-label", "Event name");
+    name.value = entry.name;
+    name.placeholder = placeholder;
+    name.setAttribute("aria-label", `${cap(noun)} name`);
     name.addEventListener("input", () => {
-      event.name = name.value;
-      remove.setAttribute("aria-label", `Remove ${event.name || "event"}`);
+      entry.name = name.value;
+      remove.setAttribute("aria-label", `Remove ${entry.name || noun}`);
       saveState();
     });
 
@@ -326,13 +455,13 @@ function renderEvents() {
     age.step = "1";
     age.min = "16";
     age.max = "120";
-    age.value = event.age ?? "";
+    age.value = entry.age ?? "";
     age.setAttribute("aria-label", "At age");
     age.title = "At age";
     age.addEventListener("input", () => {
       // Cleared, or mid-typing garbage: null keeps the row editable and the
-      // engine skips it, rather than silently spending in year zero.
-      event.age = num(age.value, null);
+      // engine skips it, rather than silently landing in year zero.
+      entry.age = num(age.value, null);
       saveState();
       recompute();
     });
@@ -341,10 +470,10 @@ function renderEvents() {
     amount.type = "number";
     amount.step = "1000";
     amount.min = "0";
-    amount.value = event.amount;
+    amount.value = entry.amount;
     amount.setAttribute("aria-label", `Amount in today's ${state.currency}`);
     amount.addEventListener("input", () => {
-      event.amount = Math.max(0, num(amount.value, 0));
+      entry.amount = Math.max(0, num(amount.value, 0));
       saveState();
       recompute();
     });
@@ -353,12 +482,12 @@ function renderEvents() {
     remove.type = "button";
     remove.className = "account-remove";
     remove.textContent = "\u00d7";
-    remove.setAttribute("aria-label", `Remove ${event.name || "event"}`);
+    remove.setAttribute("aria-label", `Remove ${entry.name || noun}`);
     remove.addEventListener("click", () => {
-      const i = state.events.indexOf(event);
-      if (i >= 0) state.events.splice(i, 1);
+      const i = state[kind].indexOf(entry);
+      if (i >= 0) state[kind].splice(i, 1);
       saveState();
-      renderEvents();
+      renderOneOffs(kind);
       recompute();
     });
 
@@ -367,33 +496,46 @@ function renderEvents() {
   }
 }
 
-/* ---------- monthly spending log ---------- */
-function entryFor(key) {
-  if (!state.spendLog[key]) state.spendLog[key] = { byCategory: {} };
-  const entry = state.spendLog[key];
+function cap(word) {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/* ---------- the monthly log ---------- */
+/**
+ * Spending and savings are two logs of the same shape, so one row renderer,
+ * one variance cell and one month navigator serve both. What differs is the
+ * sign: an overspend is bad news, and saving past the target is good news.
+ */
+function entryFor(logKey, key) {
+  if (!state[logKey][key]) state[logKey][key] = { byCategory: {} };
+  const entry = state[logKey][key];
   if (!entry.byCategory) entry.byCategory = {};
   return entry;
 }
 
 /** Drop a month once nothing is left in it, so "logged" stays honest. */
-function pruneMonth(key) {
-  if (!isLogged(state.spendLog, key)) delete state.spendLog[key];
+function pruneMonth(logKey, key) {
+  if (!isLogged(state[logKey], key)) delete state[logKey][key];
 }
 
 /**
  * How far back the log can be browsed: three years, or further if an imported
  * backup holds older months — those still feed the average, so they must stay
- * reachable.
+ * reachable. Either log can hold the oldest month.
  */
 function earliestMonth() {
   const floor = addMonths(monthKey(new Date()), -36);
-  const oldest = loggedMonths(state.spendLog)[0];
+  const oldest = [loggedMonths(state.spendLog)[0], loggedMonths(state.savingsLog)[0]]
+    .filter(Boolean)
+    .sort()[0];
   return oldest && oldest < floor ? oldest : floor;
 }
 
 // Variance cells are refreshed in place as amounts are typed, so the inputs keep
-// their focus and caret instead of being rebuilt on every keystroke.
-let logVarianceCells = new Map();
+// their focus and caret instead of being rebuilt on every keystroke. Subtotals
+// are kept separately because their amounts move too, not just their variance.
+let varianceCells = { spendLog: new Map(), savingsLog: new Map() };
+let subtotalCells = new Map();
 
 function renderLog() {
   const thisMonth = monthKey(new Date());
@@ -401,86 +543,125 @@ function renderLog() {
   document.getElementById("log-next").disabled = selectedMonth >= thisMonth;
   document.getElementById("log-prev").disabled = selectedMonth <= earliestMonth();
   document.getElementById("log-today").hidden = selectedMonth === thisMonth;
-
-  const { rows } = monthVariance(state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
-  const soloOther = rows.length === 1 && rows[0].id === OTHER_ID;
-  const list = document.getElementById("log-list");
-  list.textContent = "";
-  logVarianceCells = new Map();
-  if (!soloOther) list.append(logHeadRow());
-
-  for (const r of rows) {
-    const row = document.createElement("div");
-    row.className = "log-row";
-
-    const name = document.createElement("span");
-    name.className = "log-name";
-    name.textContent = soloOther ? "Total spent" : r.name;
-    if (r.archived) {
-      const tag = document.createElement("small");
-      tag.textContent = " (removed)";
-      name.append(tag);
-    }
-
-    const budget = document.createElement("span");
-    budget.className = "log-budget";
-    budget.textContent = r.budget === null ? "—" : fmtFull(r.budget);
-
-    const spent = document.createElement("input");
-    spent.type = "number";
-    spent.min = "0";
-    spent.step = "10";
-    spent.value = r.actual === null ? "" : r.actual;
-    spent.placeholder = "0";
-    spent.setAttribute(
-      "aria-label",
-      soloOther
-        ? `Total spent in ${formatMonth(selectedMonth)}`
-        : `Spent on ${r.name} in ${formatMonth(selectedMonth)}`,
-    );
-    spent.addEventListener("input", () => {
-      const raw = parseFloat(spent.value);
-      // Negatives are dropped on reload by sanitiseLog, so never accept one here
-      // — otherwise the totals would quietly change on the next page load.
-      const v = Number.isFinite(raw) && raw >= 0 ? raw : null;
-      const entry = entryFor(selectedMonth);
-      if (r.id === OTHER_ID) {
-        if (v !== null) entry.other = v;
-        else delete entry.other;
-      } else if (v !== null) {
-        entry.byCategory[r.id] = v;
-      } else {
-        delete entry.byCategory[r.id];
-      }
-      pruneMonth(selectedMonth);
-      saveState();
-      recompute(); // re-renders the summary, and the forecast if it is on actuals
-    });
-
-    const variance = document.createElement("span");
-    applyVariance(variance, r.variance, r.budget);
-    logVarianceCells.set(r.id, variance);
-
-    if (soloOther) row.append(name, spent);
-    else row.append(name, budget, spent, variance);
-    row.classList.toggle("log-row-solo", soloOther);
-    list.append(row);
-  }
+  renderSpendRows();
+  renderSavingsRows();
   renderLogSummary();
 }
 
-function refreshVariances(rows) {
-  if (logVarianceCells.size === 0) return;
-  for (const r of rows) {
-    const cell = logVarianceCells.get(r.id);
-    if (cell) applyVariance(cell, r.variance, r.budget);
+function renderSpendRows() {
+  const { sections } = monthSections(
+    state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
+  const list = document.getElementById("log-list");
+  list.textContent = "";
+  varianceCells.spendLog = new Map();
+  subtotalCells = new Map();
+
+  const filled = sections.filter((s) => s.rows.length > 0);
+  const solo = filled.length === 1 && filled[0].rows.length === 1;
+  const spec = {
+    logKey: "spendLog",
+    solo,
+    positiveIsGood: false,
+    soloLabel: "Total spent",
+    aria: (r) => (solo
+      ? `Total spent in ${formatMonth(selectedMonth)}`
+      : `Spent on ${r.name} in ${formatMonth(selectedMonth)}`),
+  };
+
+  if (!solo) list.append(logHeadRow("Category", "Budget", "Spent", "vs budget"));
+  // With nothing marked fixed there is only one group, and a lone "Variable"
+  // heading would name a distinction the user has not drawn yet.
+  const grouped = filled.length > 1;
+  for (const section of filled) {
+    if (grouped) list.append(groupHeadRow(section.label));
+    for (const r of section.rows) list.append(logRow(r, spec));
+    // A one-row group is its own subtotal; repeating it says nothing.
+    if (grouped && section.rows.length > 1) list.append(subtotalRow(section, spec));
   }
 }
 
-function logHeadRow() {
+function renderSavingsRows() {
+  const { rows } = savingsVariance(state.savingsLog, selectedMonth, state.savingsBuckets);
+  const list = document.getElementById("savings-log-list");
+  list.textContent = "";
+  varianceCells.savingsLog = new Map();
+
+  const solo = rows.length === 1;
+  const spec = {
+    logKey: "savingsLog",
+    solo,
+    positiveIsGood: true,
+    soloLabel: "Total saved",
+    aria: (r) => (solo
+      ? `Total saved in ${formatMonth(selectedMonth)}`
+      : `Saved into ${r.name} in ${formatMonth(selectedMonth)}`),
+  };
+
+  if (!solo) list.append(logHeadRow("Bucket", "Target", "Saved", "vs target"));
+  for (const r of rows) list.append(logRow(r, spec));
+}
+
+function logRow(r, spec) {
+  const row = document.createElement("div");
+  row.className = "log-row";
+
+  const name = document.createElement("span");
+  name.className = "log-name";
+  name.textContent = spec.solo ? spec.soloLabel : r.name;
+  if (r.archived) {
+    const tag = document.createElement("small");
+    tag.textContent = " (removed)";
+    name.append(tag);
+  }
+
+  const planned = document.createElement("span");
+  planned.className = "log-budget";
+  planned.textContent = r.budget === null ? "—" : fmtFull(r.budget);
+
+  const amount = document.createElement("input");
+  amount.type = "number";
+  amount.min = "0";
+  amount.step = "10";
+  amount.value = r.actual === null ? "" : r.actual;
+  amount.placeholder = "0";
+  amount.setAttribute("aria-label", spec.aria(r));
+  amount.addEventListener("input", () => {
+    const raw = parseFloat(amount.value);
+    // Negatives are dropped on reload by sanitiseLog, so never accept one here
+    // — otherwise the totals would quietly change on the next page load.
+    const v = Number.isFinite(raw) && raw >= 0 ? raw : null;
+    const entry = entryFor(spec.logKey, selectedMonth);
+    if (r.id === OTHER_ID) {
+      if (v !== null) entry.other = v;
+      else delete entry.other;
+    } else if (v !== null) {
+      entry.byCategory[r.id] = v;
+    } else {
+      delete entry.byCategory[r.id];
+    }
+    pruneMonth(spec.logKey, selectedMonth);
+    saveState();
+    // Spending can drive the forecast; savings never does, so it only needs
+    // the summary block redrawn.
+    if (spec.logKey === "spendLog") recompute();
+    else renderLogSummary();
+  });
+
+  const variance = document.createElement("span");
+  applyVariance(variance, r.variance, r.budget, spec.positiveIsGood);
+  varianceCells[spec.logKey].set(r.id, variance);
+
+  if (spec.solo) row.append(name, amount);
+  else row.append(name, planned, amount, variance);
+  row.classList.toggle("log-row-solo", spec.solo);
+  return row;
+}
+
+function logHeadRow(nameLabel, plannedLabel, actualLabel, varianceLabel) {
   const head = document.createElement("div");
   head.className = "log-row log-head";
-  for (const label of ["Category", "Budget", `Spent in ${formatMonth(selectedMonth).split(" ")[0]}`, "vs budget"]) {
+  const month = formatMonth(selectedMonth).split(" ")[0];
+  for (const label of [nameLabel, plannedLabel, `${actualLabel} in ${month}`, varianceLabel]) {
     const cell = document.createElement("span");
     cell.textContent = label;
     head.append(cell);
@@ -488,30 +669,91 @@ function logHeadRow() {
   return head;
 }
 
-/** Sign carries the meaning, so colour is never the only channel. */
-function applyVariance(el, variance, budget) {
+function groupHeadRow(label) {
+  const row = document.createElement("div");
+  row.className = "log-group";
+  row.textContent = label;
+  return row;
+}
+
+function subtotalRow(section, spec) {
+  const row = document.createElement("div");
+  row.className = "log-row log-subtotal";
+
+  const name = document.createElement("span");
+  name.className = "log-name";
+  name.textContent = "Subtotal";
+
+  // The labels only surface on narrow screens, where the header row is hidden
+  // and two bare amounts under "Subtotal" would be anyone's guess.
+  const planned = document.createElement("span");
+  planned.className = "log-budget";
+  planned.dataset.label = "Budget";
+  const actual = document.createElement("span");
+  actual.className = "log-budget log-actual";
+  actual.dataset.label = "Spent";
+  const variance = document.createElement("span");
+
+  row.append(name, planned, actual, variance);
+  subtotalCells.set(section.kind, { planned, actual, variance });
+  applySubtotal(section, spec.positiveIsGood);
+  return row;
+}
+
+function applySubtotal(section, positiveIsGood) {
+  const cells = subtotalCells.get(section.kind);
+  if (!cells) return;
+  const { budget, actual, variance } = section.subtotal;
+  cells.planned.textContent = budget === null ? "—" : fmtFull(budget);
+  cells.actual.textContent = actual === null ? "—" : fmtFull(actual);
+  applyVariance(cells.variance, variance, budget, positiveIsGood);
+}
+
+function refreshVariances(logKey, rows, positiveIsGood) {
+  const cells = varianceCells[logKey];
+  if (cells.size === 0) return;
+  for (const r of rows) {
+    const cell = cells.get(r.id);
+    if (cell) applyVariance(cell, r.variance, r.budget, positiveIsGood);
+  }
+}
+
+/**
+ * Sign carries the meaning, so colour is never the only channel. Which sign is
+ * the good one is the caller's call: over budget is bad, over target is good.
+ */
+function applyVariance(el, variance, planned, positiveIsGood = false) {
   el.className = "log-variance";
   if (variance === null) {
     el.textContent = "—";
     return;
   }
-  const tolerance = Math.max(1, Math.abs(num(budget, 0)) * 0.02);
+  const tolerance = Math.max(1, Math.abs(num(planned, 0)) * 0.02);
   if (Math.abs(variance) < tolerance) {
-    el.textContent = "on budget";
-  } else if (variance > 0) {
-    el.textContent = `+${fmtFull(variance)}`;
-    el.classList.add("tile-critical");
-  } else {
-    el.textContent = `−${fmtFull(Math.abs(variance))}`;
-    el.classList.add("tile-good");
+    el.textContent = positiveIsGood ? "on target" : "on budget";
+    return;
   }
+  const good = variance > 0 === Boolean(positiveIsGood);
+  el.textContent = `${variance > 0 ? "+" : "−"}${fmtFull(Math.abs(variance))}`;
+  el.classList.add(good ? "tile-good" : "tile-critical");
 }
 
 function renderLogSummary() {
+  const spend = monthSections(
+    state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
+  refreshVariances("spendLog", spend.rows, false);
+  for (const section of spend.sections) applySubtotal(section, false);
+  renderSpendSummary(spend.total, spend.logged);
+
+  const savings = savingsVariance(state.savingsLog, selectedMonth, state.savingsBuckets);
+  refreshVariances("savingsLog", savings.rows, true);
+  renderSavingsSummary(savings.total, savings.logged);
+
+  renderNetLine(spend.total, savings.total);
+}
+
+function renderSpendSummary(total, logged) {
   const el = document.getElementById("log-summary");
-  const { rows, total, logged } =
-    monthVariance(state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
-  refreshVariances(rows);
   if (!logged) {
     el.textContent = `Nothing logged for ${formatMonth(selectedMonth)} yet.`;
     el.className = "log-summary";
@@ -525,6 +767,47 @@ function renderLogSummary() {
   else if (diff < -tolerance) { tail = `${fmtFull(-diff)} under`; tone = "tile-good"; }
   el.textContent = `Logged ${fmtFull(total.actual)} of ${fmtFull(total.budget)} budgeted — ${tail}.`;
   el.className = `log-summary ${tone}`.trim();
+}
+
+function renderSavingsSummary(total, logged) {
+  const el = document.getElementById("savings-summary");
+  el.className = "log-summary";
+  if (!logged) {
+    el.textContent = `Nothing saved logged for ${formatMonth(selectedMonth)} yet.`;
+    return;
+  }
+  // With no targets set there is nothing to be short of, so the figure stands
+  // on its own rather than being scored against a zero nobody chose.
+  if (!(total.target > 0)) {
+    el.textContent = `Saved ${fmtFull(total.actual)} in ${formatMonth(selectedMonth)}.`;
+    return;
+  }
+  const diff = total.variance;
+  const tolerance = Math.max(1, total.target * 0.02);
+  let tail = "right on target";
+  let tone = "";
+  if (diff > tolerance) { tail = `${fmtFull(diff)} ahead`; tone = "tile-good"; }
+  else if (diff < -tolerance) { tail = `${fmtFull(-diff)} short`; tone = "tile-critical"; }
+  el.textContent = `Saved ${fmtFull(total.actual)} of ${fmtFull(total.target)} targeted — ${tail}.`;
+  el.className = `log-summary ${tone}`.trim();
+}
+
+/**
+ * The savings rate is the one number neither log can give on its own, which is
+ * the whole reason this line exists. It is a share of what was logged, not of
+ * income — nothing here knows what actually reached the bank.
+ */
+function renderNetLine(spent, saved) {
+  const el = document.getElementById("log-net");
+  el.className = "log-net";
+  const tracked = num(spent.actual, 0) + num(saved.actual, 0);
+  if (spent.actual === null || saved.actual === null || tracked <= 0) {
+    el.textContent = "";
+    return;
+  }
+  const rate = Math.round((saved.actual / tracked) * 100);
+  el.textContent = `${formatMonth(selectedMonth)}: ${fmtFull(spent.actual)} spent, ` +
+    `${fmtFull(saved.actual)} saved — ${rate}% of what you logged was kept.`;
 }
 
 /** The month the average runs up to: the last completed one. */
@@ -583,6 +866,7 @@ function recompute() {
     includeTax: state.includeTax,
     cpf: state.cpf,
     events: state.events,
+    windfalls: state.windfalls,
   });
 
   updateIncomeHint();
@@ -757,7 +1041,7 @@ const PAGE_COPY = {
   },
   tracker: {
     title: "Monthly tracker · Wealth Projection",
-    tagline: "Log what you actually spent, month by month, against your budget.",
+    tagline: "Log what you actually spent and saved, month by month, against your plan.",
   },
 };
 
@@ -833,23 +1117,27 @@ document.getElementById("add-account").addEventListener("click", () => {
   rows[rows.length - 1]?.querySelector("input")?.focus();
 });
 
-document.getElementById("add-event").addEventListener("click", () => {
-  state.events.push({ name: "", age: state.currentAge + 5, amount: 0 });
-  saveState();
-  renderEvents();
-  recompute();
-  const rows = document.querySelectorAll("#events-list .event-row");
-  rows[rows.length - 1]?.querySelector("input")?.focus();
-});
+for (const [kind, { listId, noun }] of Object.entries(ONE_OFF_LISTS)) {
+  document.getElementById(`add-${noun}`).addEventListener("click", () => {
+    state[kind].push({ name: "", age: state.currentAge + 5, amount: 0 });
+    saveState();
+    renderOneOffs(kind);
+    recompute();
+    const rows = document.querySelectorAll(`#${listId} .one-off-row`);
+    rows[rows.length - 1]?.querySelector("input")?.focus();
+  });
+}
 
-document.getElementById("add-category").addEventListener("click", () => {
-  state.spendCategories.push({ id: newId(), name: "" });
-  saveState();
-  renderBudget();
-  renderLog();
-  const rows = document.querySelectorAll("#budget-list .budget-row");
-  rows[rows.length - 1]?.querySelector("input")?.focus();
-});
+for (const [listKey, { listId, noun }] of Object.entries(NAMED_LISTS)) {
+  document.getElementById(`add-${noun}`).addEventListener("click", () => {
+    state[listKey].push({ id: newId(), name: "" });
+    saveState();
+    renderNamedList(listKey);
+    renderLog();
+    const rows = document.querySelectorAll(`#${listId} .budget-row`);
+    rows[rows.length - 1]?.querySelector("input")?.focus();
+  });
+}
 
 document.getElementById("log-prev").addEventListener("click", () => stepMonth(-1));
 document.getElementById("log-next").addEventListener("click", () => stepMonth(1));
@@ -924,7 +1212,8 @@ function renderBackupStatus() {
   const el = document.getElementById("backup-status");
   // A default install has nothing to lose yet, so only nag once something
   // has actually been entered.
-  const hasData = loggedMonths(state.spendLog).length > 0 || state.spendCategories.length > 0;
+  const hasData = loggedMonths(state.spendLog).length > 0 || state.spendCategories.length > 0
+    || loggedMonths(state.savingsLog).length > 0 || state.savingsBuckets.length > 0;
   const { label, stale } = backupHint(state.lastBackupAt, { hasData });
   el.textContent = label;
   el.classList.toggle("backup-status-stale", stale);
@@ -934,8 +1223,10 @@ function rerenderAll() {
   applyTheme();
   syncInputsFromState();
   renderAccounts();
-  renderEvents();
-  renderBudget();
+  renderOneOffs("events");
+  renderOneOffs("windfalls");
+  renderNamedList("spendCategories");
+  renderNamedList("savingsBuckets");
   renderLog();
   renderBackupStatus();
   recompute();
@@ -968,8 +1259,10 @@ bindPlanInputs();
 bindCpfInputs();
 bindViewToggle();
 renderAccounts();
-renderEvents();
-renderBudget();
+renderOneOffs("events");
+renderOneOffs("windfalls");
+renderNamedList("spendCategories");
+renderNamedList("savingsBuckets");
 renderLog();
 renderBackupStatus();
 recompute();

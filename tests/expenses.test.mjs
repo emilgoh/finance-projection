@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   OTHER_ID, monthKey, parseMonth, addMonths, formatMonth,
-  activeCategories, categoryBudgetTotal,
-  monthTotal, isLogged, loggedMonths, monthVariance,
+  activeCategories, categoryKind, categoriesOfKind, categoryBudgetTotal, bucketTargetTotal,
+  monthTotal, isLogged, loggedMonths, monthVariance, monthSections, savingsVariance,
   averageMonthlySpend, effectiveExpenses,
 } from "../js/expenses.js";
 import { project } from "../js/projection.js";
@@ -220,4 +220,141 @@ test("spending more than planned lowers the projection when actuals drive it", (
     onActuals.retirementRow.nominal < onBudget.retirementRow.nominal,
     "overspending should leave less at retirement",
   );
+});
+
+/* ---------- fixed and variable ---------- */
+
+const split = [
+  { id: "c1", name: "Rent", kind: "fixed", budget: 1500 },
+  { id: "c2", name: "Food", kind: "variable", budget: 800 },
+  { id: "c3", name: "Insurance", kind: "fixed", budget: 200 },
+];
+
+test("a category with no kind reads as variable, not as dropped", () => {
+  assert.equal(categoryKind({ id: "x", name: "Old" }), "variable");
+  assert.equal(categoryKind({ id: "x", kind: "FIXED" }), "variable", "only the exact value counts");
+  assert.equal(categoryKind(undefined), "variable");
+  assert.equal(categoryKind({ id: "x", kind: "fixed" }), "fixed");
+});
+
+test("categoriesOfKind keeps original order and skips archived", () => {
+  const list = [...split, { id: "c4", name: "Gym", kind: "fixed", budget: 90, archived: true }];
+  assert.deepEqual(categoriesOfKind(list, "fixed").map((c) => c.name), ["Rent", "Insurance"]);
+  assert.deepEqual(categoriesOfKind(list, "variable").map((c) => c.name), ["Food"]);
+});
+
+test("categoryBudgetTotal filters by kind only when asked", () => {
+  assert.equal(categoryBudgetTotal(split), 2500);
+  assert.equal(categoryBudgetTotal(split, "fixed"), 1700);
+  assert.equal(categoryBudgetTotal(split, "variable"), 800);
+});
+
+test("sections hold every row exactly once, and the total stays the whole month", () => {
+  const log = { "2026-06": { byCategory: { c1: 1500, c2: 900, c3: 200 }, other: 50 } };
+  const { sections, rows, total } = monthSections(log, "2026-06", split, 2500);
+  const grouped = sections.flatMap((s) => s.rows);
+  assert.equal(grouped.length, rows.length);
+  assert.deepEqual(new Set(grouped.map((r) => r.id)), new Set(rows.map((r) => r.id)));
+  assert.equal(total.actual, 2650, "the grouping is a lens, not a filter");
+});
+
+test("Other and orphaned ids land under variable", () => {
+  const log = { "2026-06": { byCategory: { gone: 40 }, other: 50 } };
+  const { sections } = monthSections(log, "2026-06", split, 2500);
+  const variable = sections.find((s) => s.kind === "variable");
+  assert.ok(variable.rows.some((r) => r.id === OTHER_ID));
+  assert.ok(variable.rows.some((r) => r.id === "gone"));
+  assert.deepEqual(sections.find((s) => s.kind === "fixed").rows.map((r) => r.id), ["c1", "c3"]);
+});
+
+test("subtotals count their own group, and only the budgets that group set", () => {
+  const log = { "2026-06": { byCategory: { c1: 1600, c2: 900, c3: 200 }, other: 50 } };
+  const { sections } = monthSections(log, "2026-06", split, 2500);
+  const fixed = sections.find((s) => s.kind === "fixed").subtotal;
+  assert.deepEqual(fixed, { budget: 1700, actual: 1800, variance: 100 });
+
+  // Food budgets 800; Other and the untracked rest carry no budget of their own.
+  const variable = sections.find((s) => s.kind === "variable").subtotal;
+  assert.deepEqual(variable, { budget: 800, actual: 950, variance: 150 });
+});
+
+test("a subtotal with no budgets anywhere in the group reports none", () => {
+  const bare = [{ id: "c1", name: "Rent", kind: "fixed" }];
+  const log = { "2026-06": { byCategory: { c1: 1500 } } };
+  const { sections } = monthSections(log, "2026-06", bare, 2500);
+  assert.deepEqual(sections.find((s) => s.kind === "fixed").subtotal,
+    { budget: null, actual: 1500, variance: null });
+});
+
+test("an unlogged month leaves every subtotal unknown rather than zero", () => {
+  const { sections, logged } = monthSections({}, "2026-06", split, 2500);
+  assert.equal(logged, false);
+  for (const s of sections) assert.equal(s.subtotal.actual, null);
+});
+
+test("both groups exist even when one is empty, so the shape never varies", () => {
+  const { sections } = monthSections({}, "2026-06", [], 2500);
+  assert.deepEqual(sections.map((s) => s.kind), ["fixed", "variable"]);
+  assert.equal(sections.find((s) => s.kind === "fixed").rows.length, 0);
+});
+
+/* ---------- savings ---------- */
+
+const buckets = [
+  { id: "b1", name: "Emergency fund", target: 500 },
+  { id: "b2", name: "Brokerage", target: 1000 },
+  { id: "b3", name: "Old goal", target: 200, archived: true },
+];
+
+test("bucket targets total only the live buckets", () => {
+  assert.equal(bucketTargetTotal(buckets), 1500);
+  assert.equal(bucketTargetTotal(null), 0);
+});
+
+test("savings variance is positive when ahead of target, negative when short", () => {
+  const log = { "2026-06": { byCategory: { b1: 500, b2: 800 }, other: 300 } };
+  const { rows, total } = savingsVariance(log, "2026-06", buckets);
+  assert.deepEqual(rows.find((r) => r.id === "b1"), {
+    id: "b1", name: "Emergency fund", archived: false, budget: 500, actual: 500, variance: 0,
+  });
+  assert.equal(rows.find((r) => r.id === "b2").variance, -200, "short of target");
+  assert.deepEqual(total, { target: 1500, actual: 1600, variance: 100 });
+});
+
+test("the unallocated savings row is always offered and carries no target", () => {
+  const { rows } = savingsVariance({}, "2026-06", buckets);
+  const other = rows.find((r) => r.id === OTHER_ID);
+  assert.equal(other.name, "Unallocated");
+  assert.equal(other.budget, null);
+  assert.equal(other.actual, null, "an unlogged month is unknown, not zero");
+});
+
+test("an archived bucket with money logged this month keeps its own name", () => {
+  const log = { "2026-06": { byCategory: { b3: 200 } } };
+  const { rows } = savingsVariance(log, "2026-06", buckets);
+  const row = rows.find((r) => r.id === "b3");
+  assert.equal(row.name, "Old goal");
+  assert.equal(row.archived, true);
+  assert.equal(row.actual, 200);
+});
+
+test("savings and spending are separate ledgers — neither shows in the other", () => {
+  const spendLog = { "2026-06": { byCategory: { c1: 1500 } } };
+  const savingsLog = { "2026-06": { byCategory: { b1: 500 } } };
+  assert.equal(monthSections(spendLog, "2026-06", split, 2500).total.actual, 1500);
+  assert.equal(savingsVariance(savingsLog, "2026-06", buckets).total.actual, 500);
+  assert.equal(savingsVariance(spendLog, "2026-06", buckets).total.actual, 1500,
+    "the shapes are interchangeable, so only the caller keeps them apart");
+});
+
+test("logged savings never reach the projection's expense basis", () => {
+  const savingsLog = { "2026-06": { byCategory: { b1: 5000 } } };
+  const withSavings = effectiveExpenses({
+    spendLog: { "2026-06": { other: 2000 } },
+    monthlyExpenses: 3500,
+    useActuals: true,
+    endMonth: "2026-07",
+  });
+  assert.equal(withSavings.monthly, 2000, "only the spend log feeds it");
+  assert.equal(monthTotal(savingsLog["2026-06"]), 5000, "and the savings log is untouched by it");
 });

@@ -35,10 +35,13 @@ export const DEFAULT_STATE = {
     { name: "Brokerage", type: "investments", value: 20000 },
     { name: "SRS", type: "retirement", value: 10000 },
   ],
-  spendCategories: [],            // optional: [{ id, name, budget, archived }]
+  spendCategories: [],            // optional: [{ id, name, kind, budget, archived }]
   spendLog: {},                   // "YYYY-MM" -> { byCategory: { id: n }, other: n }
+  savingsBuckets: [],             // optional: [{ id, name, target, archived }]
+  savingsLog: {},                 // same month-entry shape, keyed by bucket id
   useActualsForForecast: false,
   events: [],                     // optional: [{ name, age, amount }] in today's money
+  windfalls: [],                  // optional: [{ name, age, amount }] in today's money
   lastBackupAt: null,             // ISO string, set when a backup is exported
 };
 
@@ -79,8 +82,11 @@ export function mergeSaved(saved) {
   // categories, and an imported file is no longer a trusted source.
   merged.spendCategories = sanitiseCategories(saved.spendCategories);
   merged.spendLog = sanitiseLog(saved.spendLog);
+  merged.savingsBuckets = sanitiseSavingsBuckets(saved.savingsBuckets);
+  merged.savingsLog = sanitiseLog(saved.savingsLog);
   merged.useActualsForForecast = Boolean(saved.useActualsForForecast);
-  merged.events = sanitiseEvents(saved.events);
+  merged.events = sanitiseOneOffs(saved.events);
+  merged.windfalls = sanitiseOneOffs(saved.windfalls);
   merged.lastBackupAt = sanitiseTimestamp(saved.lastBackupAt);
   if ("accounts" in (saved || {})) merged.accounts = sanitiseAccounts(saved.accounts);
   return merged;
@@ -105,28 +111,81 @@ export function newId() {
   return crypto.randomUUID?.() ?? `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/**
+ * `kind` is written out even when it is the default, so a stored category always
+ * says which side of the split it is on rather than leaving the reader to infer
+ * it. Categories saved before the split have no kind and become variable.
+ */
 export function sanitiseCategories(list) {
+  return sanitiseNamedList(list, "budget", (src, cat) => {
+    cat.kind = src.kind === "fixed" ? "fixed" : "variable";
+  });
+}
+
+/**
+ * Savings buckets are categories in a different suit: same ids, same archiving,
+ * a monthly `target` where a category has a `budget`, and no fixed/variable
+ * split — money saved is money saved.
+ */
+export function sanitiseSavingsBuckets(list) {
+  return sanitiseNamedList(list, "target");
+}
+
+/**
+ * Ids have to be unique and present: they key the month log, so a duplicate
+ * would merge two rows' history and a missing one would strand it.
+ */
+function sanitiseNamedList(list, amountKey, decorate) {
   if (!Array.isArray(list)) return [];
   const seen = new Set();
   return list.filter((c) => c && typeof c === "object").map((c) => {
     let id = typeof c.id === "string" && c.id && !seen.has(c.id) ? c.id : newId();
     seen.add(id);
-    const cat = { id, name: String(c.name ?? "") };
-    if (Number.isFinite(c.budget)) cat.budget = c.budget;
-    if (c.archived) cat.archived = true;
-    return cat;
+    const item = { id, name: String(c.name ?? "") };
+    decorate?.(c, item);
+    if (Number.isFinite(c[amountKey])) item[amountKey] = c[amountKey];
+    if (c.archived) item.archived = true;
+    return item;
   });
 }
 
 /**
- * Events reach the projection engine, which ignores a non-finite age but would
- * happily arithmetic on a string amount. Rows are also rendered and mutated in
- * place, so the shape has to survive an untrusted import.
+ * Move one item of a category or bucket list by one visible place. Archived
+ * items are not on screen, so they are stepped over rather than absorbing the
+ * move and making the button look broken.
+ *
+ * Returns true when something actually moved, so callers can skip a re-render.
+ */
+export function moveItem(list, item, delta) {
+  if (!Array.isArray(list)) return false;
+  const from = list.indexOf(item);
+  const step = delta < 0 ? -1 : 1;
+  if (from < 0 || !delta) return false;
+
+  let to = from + step;
+  while (to >= 0 && to < list.length && list[to]?.archived) to += step;
+  if (to < 0 || to >= list.length) return false;
+
+  // Removing first shifts everything after `from` down one, which is exactly
+  // what makes inserting at `to` land on the far side of the neighbour.
+  list.splice(to, 0, list.splice(from, 1)[0]);
+  return true;
+}
+
+/**
+ * Shared by life events and windfalls, which have the same shape: a one-off
+ * amount in today's money at a given age. Both reach the projection engine,
+ * which ignores a non-finite age but would happily arithmetic on a string
+ * amount. Rows are also rendered and mutated in place, so the shape has to
+ * survive an untrusted import.
  *
  * An unusable age becomes null rather than 0 — the row stays editable and the
  * engine skips it, where 0 would claim to be a real age nobody reaches.
+ *
+ * A negative amount is clamped to 0 rather than flipped: an event that pays
+ * you, or a windfall that costs you, is the other list's job.
  */
-export function sanitiseEvents(list) {
+export function sanitiseOneOffs(list) {
   if (!Array.isArray(list)) return [];
   return list
     .filter((e) => e && typeof e === "object")
@@ -137,6 +196,7 @@ export function sanitiseEvents(list) {
     }));
 }
 
+/** Shared by `spendLog` and `savingsLog` — one month-entry shape, two uses. */
 export function sanitiseLog(log) {
   if (!log || typeof log !== "object") return {};
   const out = {};
