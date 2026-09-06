@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   OTHER_ID, monthKey, parseMonth, addMonths, formatMonth,
+  isDateKey, dayKey, monthOfDay, formatDay,
+  entriesForMonth, entriesByDay, dailyMonthTotals, effectiveSpendLog,
   activeCategories, categoryKind, categoriesOfKind, categoryBudgetTotal, bucketTargetTotal,
   monthTotal, isLogged, loggedMonths, monthVariance, monthSections, savingsVariance,
   averageMonthlySpend, effectiveExpenses,
@@ -357,4 +359,147 @@ test("logged savings never reach the projection's expense basis", () => {
   });
   assert.equal(withSavings.monthly, 2000, "only the spend log feeds it");
   assert.equal(monthTotal(savingsLog["2026-06"]), 5000, "and the savings log is untouched by it");
+});
+
+/* ---------- daily expenses ---------- */
+
+const daily = [
+  { id: "e1", date: "2026-06-03", categoryId: "c2", amount: 40, note: "" },
+  { id: "e2", date: "2026-06-01", categoryId: "c2", amount: 60, note: "" },
+  { id: "e3", date: "2026-06-01", categoryId: null, amount: 25, note: "taxi" },
+  { id: "e4", date: "2026-07-02", categoryId: "c1", amount: 900, note: "" },
+];
+
+test("isDateKey rejects a day that does not exist, not just a malformed one", () => {
+  assert.equal(isDateKey("2026-06-03"), true);
+  assert.equal(isDateKey("2026-02-31"), false, "the shape passes; the calendar does not");
+  assert.equal(isDateKey("2026-02-29"), false, "2026 is not a leap year");
+  assert.equal(isDateKey("2028-02-29"), true, "2028 is");
+  for (const bad of ["2026-13-01", "2026-06-00", "2026-6-3", "not-a-date", "", null, 20260603]) {
+    assert.equal(isDateKey(bad), false, `${bad} is not a day`);
+  }
+});
+
+test("dayKey reads local time, not UTC", () => {
+  // 23:30 local on the 3rd is already the 4th in UTC; the day key must not slip.
+  assert.equal(dayKey(new Date(2026, 5, 3, 23, 30)), "2026-06-03");
+  assert.equal(dayKey(new Date(2026, 0, 1, 0, 5)), "2026-01-01");
+});
+
+test("monthOfDay gives the month a day belongs to, or nothing at all", () => {
+  assert.equal(monthOfDay("2026-06-03"), "2026-06");
+  assert.equal(monthOfDay("2026-02-31"), null);
+  assert.equal(monthOfDay(undefined), null);
+});
+
+test("formatDay names the weekday, so a mis-dated entry is visible", () => {
+  assert.equal(formatDay("2026-06-03"), "Wed, Jun 3");
+  assert.equal(formatDay("nonsense"), "");
+});
+
+test("entriesForMonth keeps only that month, oldest day first", () => {
+  const june = entriesForMonth(daily, "2026-06");
+  assert.deepEqual(june.map((e) => e.id), ["e2", "e3", "e1"]);
+  assert.deepEqual(entriesForMonth(daily, "2026-07").map((e) => e.id), ["e4"]);
+  assert.deepEqual(entriesForMonth(daily, "2026-05"), []);
+});
+
+test("entriesForMonth holds the order entries were added to a single day", () => {
+  const sameDay = [
+    { id: "b", date: "2026-06-01", amount: 1 },
+    { id: "a", date: "2026-06-01", amount: 2 },
+  ];
+  assert.deepEqual(entriesForMonth(sameDay, "2026-06").map((e) => e.id), ["b", "a"]);
+});
+
+test("entriesByDay groups with a total each, and skips days with nothing", () => {
+  const days = entriesByDay(daily, "2026-06");
+  assert.deepEqual(days.map((d) => [d.date, d.entries.length, d.total]), [
+    ["2026-06-01", 2, 85],
+    ["2026-06-03", 1, 40],
+  ]);
+});
+
+test("dailyMonthTotals folds entries into the month-entry shape", () => {
+  const totals = dailyMonthTotals(daily, "2026-06");
+  assert.deepEqual(totals.byCategory, { c2: 100 });
+  assert.equal(totals.other, 25, "uncategorised entries land in Other");
+  assert.deepEqual([...totals.counts], [["c2", 2], [OTHER_ID, 1]]);
+});
+
+test("a category whose entries sum to zero is still entry-driven", () => {
+  const refunded = [{ id: "r", date: "2026-06-01", categoryId: "c2", amount: 0 }];
+  const totals = dailyMonthTotals(refunded, "2026-06");
+  assert.equal(totals.byCategory.c2, 0);
+  assert.equal(totals.counts.get("c2"), 1, "a zero total and no entries must stay distinguishable");
+});
+
+/* ---------- the merge ---------- */
+
+const typed = {
+  "2026-06": { byCategory: { c1: 1500, c2: 999 }, other: 300 },
+  "2026-04": { byCategory: { c1: 1400 }, other: 50 },
+};
+
+test("entries replace the typed figure for their own cell, and only that cell", () => {
+  const merged = effectiveSpendLog(typed, daily);
+  assert.deepEqual(merged["2026-06"], { byCategory: { c1: 1500, c2: 100 }, other: 25 });
+  assert.equal(typed["2026-06"].byCategory.c2, 999, "the typed figure is left in storage");
+});
+
+test("a month with no entries is passed through untouched", () => {
+  assert.deepEqual(effectiveSpendLog(typed, daily)["2026-04"], typed["2026-04"]);
+});
+
+test("entries alone make a month logged, with no typed figures at all", () => {
+  const merged = effectiveSpendLog({}, daily);
+  assert.deepEqual(Object.keys(merged).sort(), ["2026-06", "2026-07"]);
+  assert.deepEqual(merged["2026-07"], { byCategory: { c1: 900 } });
+  assert.equal(monthTotal(merged["2026-06"]), 125);
+});
+
+test("entries are never added to the typed figure — that would double-count", () => {
+  const merged = effectiveSpendLog(
+    { "2026-06": { byCategory: { c2: 999 } } },
+    [{ id: "x", date: "2026-06-02", categoryId: "c2", amount: 10 }],
+  );
+  assert.equal(merged["2026-06"].byCategory.c2, 10);
+});
+
+test("entries summing to zero still take the cell over", () => {
+  const merged = effectiveSpendLog(
+    { "2026-06": { byCategory: { c2: 999 } } },
+    [{ id: "x", date: "2026-06-02", categoryId: "c2", amount: 0 }],
+  );
+  assert.equal(merged["2026-06"].byCategory.c2, 0);
+});
+
+test("uncategorised entries take over Other, and leave it alone otherwise", () => {
+  const withOther = effectiveSpendLog({ "2026-06": { other: 300 } },
+    [{ id: "x", date: "2026-06-02", categoryId: null, amount: 12 }]);
+  assert.equal(withOther["2026-06"].other, 12);
+
+  const untouched = effectiveSpendLog({ "2026-06": { other: 300 } },
+    [{ id: "x", date: "2026-06-02", categoryId: "c1", amount: 12 }]);
+  assert.equal(untouched["2026-06"].other, 300);
+});
+
+test("the merged log is what the variance and the forecast should read", () => {
+  const merged = effectiveSpendLog(typed, daily);
+  const { rows, total } = monthVariance(merged, "2026-06", cats, 2600);
+  assert.equal(rows.find((r) => r.id === "c2").actual, 100, "not the typed 999");
+  assert.equal(total.actual, 1625);
+
+  const { monthly, basis, monthsUsed } = effectiveExpenses({
+    spendLog: merged, monthlyExpenses: 3000, useActuals: true, endMonth: "2026-07",
+  });
+  assert.equal(basis, "actuals");
+  assert.equal(monthsUsed, 3, "the daily-only month counts as logged");
+  assert.equal(monthly, (1450 + 1625 + 900) / 3);
+});
+
+test("effectiveSpendLog survives junk on either side", () => {
+  assert.deepEqual(effectiveSpendLog(null, null), {});
+  assert.deepEqual(effectiveSpendLog({ "not-a-month": { other: 5 } }, "nope"), {});
+  assert.deepEqual(effectiveSpendLog({}, [null, { date: "2026-02-31", amount: 5 }, { amount: 5 }]), {});
 });

@@ -1,12 +1,12 @@
 /**
- * Hash routing for the two pages.
+ * Hash routing for the app's pages.
  *
  * The hash is the whole router state — no history entries are pushed by hand,
  * so the back button walks pages for free and a link like `#/tracker` opens
  * straight onto the log.
  */
 
-export const PAGES = ["projection", "tracker"];
+export const PAGES = ["projection", "tracker", "daily"];
 export const DEFAULT_PAGE = "projection";
 
 /** Anything unrecognised — an empty hash, a stale bookmark — lands on the default. */

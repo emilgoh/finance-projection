@@ -4,9 +4,10 @@ import { PAGES, DEFAULT_PAGE, pageFromHash, hashForPage, startRouter } from "../
 
 /* ---------- pageFromHash ---------- */
 
-test("pageFromHash: reads both known pages", () => {
+test("pageFromHash: reads every known page", () => {
   assert.equal(pageFromHash("#/projection"), "projection");
   assert.equal(pageFromHash("#/tracker"), "tracker");
+  assert.equal(pageFromHash("#/daily"), "daily");
 });
 
 test("pageFromHash: tolerates a missing slash and odd casing", () => {

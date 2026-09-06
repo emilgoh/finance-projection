@@ -1,7 +1,8 @@
 import { project, CPF, TAX } from "./projection.js";
 import { renderChart } from "./chart.js";
 import {
-  OTHER_ID, monthKey, addMonths, formatMonth,
+  OTHER_ID, monthKey, addMonths, formatMonth, dayKey, formatDay, monthOfDay,
+  entriesByDay, entriesForMonth, dailyMonthTotals, effectiveSpendLog,
   activeCategories, categoryKind, categoriesOfKind, categoryBudgetTotal, bucketTargetTotal,
   isLogged, loggedMonths, monthSections, savingsVariance, effectiveExpenses,
 } from "./expenses.js";
@@ -502,6 +503,20 @@ function cap(word) {
 
 /* ---------- the monthly log ---------- */
 /**
+ * The month log everything downstream reads: what was typed, with every cell
+ * that has daily entries replaced by their sum. `state.spendLog` stays the
+ * typed figures alone, so removing the entries brings the typed one back.
+ */
+function spendLog() {
+  return effectiveSpendLog(state.spendLog, state.dailyExpenses);
+}
+
+/** Which ids in the shown month are driven by daily entries, and by how many. */
+function dailyCounts(key = selectedMonth) {
+  return dailyMonthTotals(state.dailyExpenses, key).counts;
+}
+
+/**
  * Spending and savings are two logs of the same shape, so one row renderer,
  * one variance cell and one month navigator serve both. What differs is the
  * sign: an overspend is bad news, and saving past the target is good news.
@@ -525,7 +540,7 @@ function pruneMonth(logKey, key) {
  */
 function earliestMonth() {
   const floor = addMonths(monthKey(new Date()), -36);
-  const oldest = [loggedMonths(state.spendLog)[0], loggedMonths(state.savingsLog)[0]]
+  const oldest = [loggedMonths(spendLog())[0], loggedMonths(state.savingsLog)[0]]
     .filter(Boolean)
     .sort()[0];
   return oldest && oldest < floor ? oldest : floor;
@@ -536,13 +551,19 @@ function earliestMonth() {
 // are kept separately because their amounts move too, not just their variance.
 let varianceCells = { spendLog: new Map(), savingsLog: new Map() };
 let subtotalCells = new Map();
+// Cells whose figure comes from the daily log rather than an input. They move
+// as entries are typed on the other page, so they refresh the same way.
+let derivedCells = new Map();
 
 function renderLog() {
   const thisMonth = monthKey(new Date());
-  document.getElementById("log-month-label").textContent = formatMonth(selectedMonth);
-  document.getElementById("log-next").disabled = selectedMonth >= thisMonth;
-  document.getElementById("log-prev").disabled = selectedMonth <= earliestMonth();
-  document.getElementById("log-today").hidden = selectedMonth === thisMonth;
+  for (const prefix of ["log", "daily"]) {
+    document.getElementById(`${prefix}-month-label`).textContent = formatMonth(selectedMonth);
+    document.getElementById(`${prefix}-next`).disabled = selectedMonth >= thisMonth;
+    document.getElementById(`${prefix}-prev`).disabled = selectedMonth <= earliestMonth();
+    document.getElementById(`${prefix}-today`).hidden = selectedMonth === thisMonth;
+  }
+  renderDaily();
   renderSpendRows();
   renderSavingsRows();
   renderLogSummary();
@@ -550,11 +571,12 @@ function renderLog() {
 
 function renderSpendRows() {
   const { sections } = monthSections(
-    state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
+    spendLog(), selectedMonth, state.spendCategories, state.monthlyExpenses);
   const list = document.getElementById("log-list");
   list.textContent = "";
   varianceCells.spendLog = new Map();
   subtotalCells = new Map();
+  derivedCells = new Map();
 
   const filled = sections.filter((s) => s.rows.length > 0);
   const solo = filled.length === 1 && filled[0].rows.length === 1;
@@ -563,6 +585,7 @@ function renderSpendRows() {
     solo,
     positiveIsGood: false,
     soloLabel: "Total spent",
+    counts: dailyCounts(),
     aria: (r) => (solo
       ? `Total spent in ${formatMonth(selectedMonth)}`
       : `Spent on ${r.name} in ${formatMonth(selectedMonth)}`),
@@ -604,6 +627,7 @@ function renderSavingsRows() {
 function logRow(r, spec) {
   const row = document.createElement("div");
   row.className = "log-row";
+  const entryCount = spec.counts?.get(r.id) ?? 0;
 
   const name = document.createElement("span");
   name.className = "log-name";
@@ -613,11 +637,44 @@ function logRow(r, spec) {
     tag.textContent = " (removed)";
     name.append(tag);
   }
+  if (entryCount > 0) name.append(" ", entriesTag(entryCount));
 
   const planned = document.createElement("span");
   planned.className = "log-budget";
   planned.textContent = r.budget === null ? "—" : fmtFull(r.budget);
 
+  // A cell fed by daily entries is theirs to set: an input here would offer to
+  // overwrite a figure that is recomputed from the entries on every render.
+  const amount = entryCount > 0 ? derivedAmount(r) : editableAmount(r, spec);
+
+  const variance = document.createElement("span");
+  applyVariance(variance, r.variance, r.budget, spec.positiveIsGood);
+  varianceCells[spec.logKey].set(r.id, variance);
+
+  if (spec.solo) row.append(name, amount);
+  else row.append(name, planned, amount, variance);
+  row.classList.toggle("log-row-solo", spec.solo);
+  return row;
+}
+
+function derivedAmount(r) {
+  const cell = document.createElement("span");
+  cell.className = "log-budget log-actual log-derived";
+  cell.textContent = r.actual === null ? "—" : fmtFull(r.actual);
+  derivedCells.set(r.id, cell);
+  return cell;
+}
+
+/** Links to where the number comes from, since it cannot be edited here. */
+function entriesTag(count) {
+  const tag = document.createElement("a");
+  tag.className = "log-source";
+  tag.href = "#/daily";
+  tag.textContent = count === 1 ? "from 1 entry" : `from ${count} entries`;
+  return tag;
+}
+
+function editableAmount(r, spec) {
   const amount = document.createElement("input");
   amount.type = "number";
   amount.min = "0";
@@ -646,15 +703,7 @@ function logRow(r, spec) {
     if (spec.logKey === "spendLog") recompute();
     else renderLogSummary();
   });
-
-  const variance = document.createElement("span");
-  applyVariance(variance, r.variance, r.budget, spec.positiveIsGood);
-  varianceCells[spec.logKey].set(r.id, variance);
-
-  if (spec.solo) row.append(name, amount);
-  else row.append(name, planned, amount, variance);
-  row.classList.toggle("log-row-solo", spec.solo);
-  return row;
+  return amount;
 }
 
 function logHeadRow(nameLabel, plannedLabel, actualLabel, varianceLabel) {
@@ -740,8 +789,12 @@ function applyVariance(el, variance, planned, positiveIsGood = false) {
 
 function renderLogSummary() {
   const spend = monthSections(
-    state.spendLog, selectedMonth, state.spendCategories, state.monthlyExpenses);
+    spendLog(), selectedMonth, state.spendCategories, state.monthlyExpenses);
   refreshVariances("spendLog", spend.rows, false);
+  for (const r of spend.rows) {
+    const cell = derivedCells.get(r.id);
+    if (cell) cell.textContent = r.actual === null ? "—" : fmtFull(r.actual);
+  }
   for (const section of spend.sections) applySubtotal(section, false);
   renderSpendSummary(spend.total, spend.logged);
 
@@ -810,6 +863,211 @@ function renderNetLine(spent, saved) {
     `${fmtFull(saved.actual)} saved — ${rate}% of what you logged was kept.`;
 }
 
+/* ---------- the daily log ---------- */
+/**
+ * A day at a time, which is the only way most spending is actually known. The
+ * month log is where these land; nothing here is a second ledger.
+ *
+ * The add form is deliberately the first thing on the page and keeps its
+ * category and day between adds — a shopping trip is several entries in a row.
+ */
+function renderDaily() {
+  renderDailyCategoryOptions();
+  clampDailyDate();
+
+  const list = document.getElementById("daily-list");
+  list.textContent = "";
+  const days = entriesByDay(state.dailyExpenses, selectedMonth);
+  // Newest first: the day you are adding to is nearly always the last one.
+  for (const day of days.reverse()) list.append(dayGroup(day));
+
+  renderDailySummary(days);
+}
+
+function dayGroup(day) {
+  const group = document.createElement("div");
+  group.className = "day-group";
+
+  const head = document.createElement("div");
+  head.className = "day-head";
+  const label = document.createElement("span");
+  label.textContent = formatDay(day.date);
+  const total = document.createElement("span");
+  total.className = "day-total";
+  total.textContent = fmtFull(day.total);
+  head.append(label, total);
+  group.append(head);
+
+  for (const entry of day.entries) group.append(dailyRow(entry));
+  return group;
+}
+
+function dailyRow(entry) {
+  const row = document.createElement("div");
+  row.className = "daily-row";
+
+  const category = document.createElement("select");
+  category.setAttribute("aria-label", "Category");
+  fillCategoryOptions(category, entry.categoryId);
+  category.addEventListener("change", () => {
+    entry.categoryId = category.value === OTHER_ID ? null : category.value;
+    saveState();
+    // Which cells are entry-driven has just changed, so the month log needs
+    // rebuilding, not merely refreshing.
+    recompute();
+    renderLog();
+  });
+
+  const amount = document.createElement("input");
+  amount.type = "number";
+  amount.min = "0";
+  amount.step = "0.01";
+  amount.value = entry.amount;
+  amount.setAttribute("aria-label", `Amount in ${state.currency}`);
+  amount.addEventListener("input", () => {
+    entry.amount = Math.max(0, num(amount.value, 0));
+    saveState();
+    // Only the totals move, so leave the row alone and keep the caret in it.
+    refreshDayTotals();
+    recompute();
+  });
+
+  const note = document.createElement("input");
+  note.type = "text";
+  note.value = entry.note;
+  note.placeholder = "Note";
+  note.setAttribute("aria-label", "Note");
+  note.addEventListener("input", () => {
+    entry.note = note.value;
+    saveState();
+  });
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "account-remove";
+  remove.textContent = "\u00d7";
+  remove.setAttribute("aria-label", `Remove ${entry.note || "expense"}`);
+  remove.addEventListener("click", () => {
+    const i = state.dailyExpenses.indexOf(entry);
+    if (i >= 0) state.dailyExpenses.splice(i, 1);
+    saveState();
+    // The last entry for a category hands its cell back to the typed figure.
+    recompute();
+    renderLog();
+  });
+
+  row.append(category, amount, note, remove);
+  return row;
+}
+
+/** Amounts are typed into, so day and month totals move without a re-render. */
+function refreshDayTotals() {
+  const days = entriesByDay(state.dailyExpenses, selectedMonth);
+  const cells = document.querySelectorAll("#daily-list .day-total");
+  days.reverse().forEach((day, i) => {
+    if (cells[i]) cells[i].textContent = fmtFull(day.total);
+  });
+  renderDailySummary(days);
+}
+
+function renderDailySummary(days) {
+  const el = document.getElementById("daily-summary");
+  const feeds = document.getElementById("daily-feeds");
+  const entries = days.reduce((n, d) => n + d.entries.length, 0);
+  if (entries === 0) {
+    el.textContent = `Nothing logged for ${formatMonth(selectedMonth)} yet.`;
+    feeds.textContent = "";
+    return;
+  }
+  const total = days.reduce((sum, d) => sum + d.total, 0);
+  const count = entries === 1 ? "1 expense" : `${entries} expenses`;
+  el.textContent = `${count} across ${days.length === 1 ? "1 day" : `${days.length} days`}` +
+    ` — ${fmtFull(total)} in ${formatMonth(selectedMonth)}.`;
+
+  // Say plainly which cells in the tracker these have taken over, because that
+  // is the part a typed figure quietly loses to.
+  const counts = dailyCounts();
+  const named = [...counts.keys()].map((id) => (id === OTHER_ID
+    ? "Other"
+    : state.spendCategories.find((c) => c.id === id)?.name || "Uncategorised"));
+  feeds.textContent = named.length === 0 ? "" :
+    `${listPhrase(named)} ${named.length === 1 ? "is" : "are"} totalled from this list in the monthly tracker.`;
+}
+
+function listPhrase(names) {
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** Categories plus the uncategorised bucket, which is always offered. */
+function fillCategoryOptions(select, selectedId) {
+  select.textContent = "";
+  const chosen = selectedId ?? OTHER_ID;
+  const known = new Set();
+  for (const cat of activeCategories(state.spendCategories)) {
+    known.add(cat.id);
+    select.append(new Option(cat.name || "Untitled", cat.id));
+  }
+  // An entry against an archived category keeps pointing at it rather than
+  // being silently reassigned to Other.
+  if (chosen !== OTHER_ID && !known.has(chosen)) {
+    const gone = state.spendCategories.find((c) => c.id === chosen);
+    select.append(new Option(`${gone?.name || "Uncategorised"} (removed)`, chosen));
+  }
+  select.append(new Option("Other", OTHER_ID));
+  select.value = chosen;
+}
+
+function renderDailyCategoryOptions() {
+  const select = document.getElementById("daily-category");
+  fillCategoryOptions(select, select.value || null);
+}
+
+/**
+ * The add form's day stays inside the month being shown, so browsing to August
+ * and adding does not silently file the expense under today.
+ */
+function clampDailyDate() {
+  const input = document.getElementById("daily-date");
+  const today = dayKey(new Date());
+  const thisMonth = monthKey(new Date());
+  const first = `${selectedMonth}-01`;
+  const last = selectedMonth === thisMonth ? today : lastDayOf(selectedMonth);
+  input.min = first;
+  input.max = last;
+  if (monthOfDay(input.value) !== selectedMonth || input.value > last) {
+    input.value = selectedMonth === thisMonth ? today : last;
+  }
+}
+
+function lastDayOf(key) {
+  const [year, month] = key.split("-").map(Number);
+  return dayKey(new Date(year, month, 0)); // day 0 of the next month
+}
+
+function addDailyExpense() {
+  const date = document.getElementById("daily-date");
+  const category = document.getElementById("daily-category");
+  const amount = document.getElementById("daily-amount");
+  const note = document.getElementById("daily-note");
+  if (monthOfDay(date.value) !== selectedMonth) return;
+
+  state.dailyExpenses.push({
+    id: newId(),
+    date: date.value,
+    categoryId: category.value === OTHER_ID ? null : category.value,
+    amount: Math.max(0, num(amount.value, 0)),
+    note: note.value,
+  });
+  saveState();
+  // The day and category are kept: a shopping trip is several entries in a row.
+  amount.value = "";
+  note.value = "";
+  recompute();
+  renderLog(); // the first entry for a category takes its cell over
+  amount.focus();
+}
+
 /** The month the average runs up to: the last completed one. */
 function lastCompletedMonth() {
   return addMonths(monthKey(new Date()), -1);
@@ -817,7 +1075,7 @@ function lastCompletedMonth() {
 
 function currentExpenses() {
   return effectiveExpenses({
-    spendLog: state.spendLog,
+    spendLog: spendLog(),
     monthlyExpenses: state.monthlyExpenses,
     useActuals: state.useActualsForForecast,
     endMonth: lastCompletedMonth(),
@@ -1043,6 +1301,10 @@ const PAGE_COPY = {
     title: "Monthly tracker · Wealth Projection",
     tagline: "Log what you actually spent and saved, month by month, against your plan.",
   },
+  daily: {
+    title: "Daily log · Wealth Projection",
+    tagline: "Log what you spend as you spend it; it adds up into the monthly tracker.",
+  },
 };
 
 function showPage(page) {
@@ -1139,11 +1401,20 @@ for (const [listKey, { listId, noun }] of Object.entries(NAMED_LISTS)) {
   });
 }
 
-document.getElementById("log-prev").addEventListener("click", () => stepMonth(-1));
-document.getElementById("log-next").addEventListener("click", () => stepMonth(1));
-document.getElementById("log-today").addEventListener("click", () => {
-  selectedMonth = monthKey(new Date());
-  renderLog();
+// Both pages navigate the one selected month, so stepping on either keeps them
+// in step — the tracker's totals are this page's entries.
+for (const prefix of ["log", "daily"]) {
+  document.getElementById(`${prefix}-prev`).addEventListener("click", () => stepMonth(-1));
+  document.getElementById(`${prefix}-next`).addEventListener("click", () => stepMonth(1));
+  document.getElementById(`${prefix}-today`).addEventListener("click", () => {
+    selectedMonth = monthKey(new Date());
+    renderLog();
+  });
+}
+
+document.getElementById("daily-add").addEventListener("submit", (event) => {
+  event.preventDefault();
+  addDailyExpense();
 });
 
 document.getElementById("reset-data").addEventListener("click", () => {
@@ -1212,7 +1483,7 @@ function renderBackupStatus() {
   const el = document.getElementById("backup-status");
   // A default install has nothing to lose yet, so only nag once something
   // has actually been entered.
-  const hasData = loggedMonths(state.spendLog).length > 0 || state.spendCategories.length > 0
+  const hasData = loggedMonths(spendLog()).length > 0 || state.spendCategories.length > 0
     || loggedMonths(state.savingsLog).length > 0 || state.savingsBuckets.length > 0;
   const { label, stale } = backupHint(state.lastBackupAt, { hasData });
   el.textContent = label;

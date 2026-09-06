@@ -6,7 +6,7 @@
  * expenses.js are. Storage is passed in rather than reached for, so tests can
  * hand it a plain object instead of a browser.
  */
-import { MONTH_RE, isLogged } from "./expenses.js";
+import { MONTH_RE, isDateKey, isLogged } from "./expenses.js";
 
 export const STORAGE_KEY = "wealth-projection-v3";
 export const LEGACY_STORAGE_KEY = "wealth-projection-v2";
@@ -37,6 +37,7 @@ export const DEFAULT_STATE = {
   ],
   spendCategories: [],            // optional: [{ id, name, kind, budget, archived }]
   spendLog: {},                   // "YYYY-MM" -> { byCategory: { id: n }, other: n }
+  dailyExpenses: [],              // [{ id, date, categoryId, amount, note }], newest anywhere
   savingsBuckets: [],             // optional: [{ id, name, target, archived }]
   savingsLog: {},                 // same month-entry shape, keyed by bucket id
   useActualsForForecast: false,
@@ -82,6 +83,7 @@ export function mergeSaved(saved) {
   // categories, and an imported file is no longer a trusted source.
   merged.spendCategories = sanitiseCategories(saved.spendCategories);
   merged.spendLog = sanitiseLog(saved.spendLog);
+  merged.dailyExpenses = sanitiseDailyExpenses(saved.dailyExpenses);
   merged.savingsBuckets = sanitiseSavingsBuckets(saved.savingsBuckets);
   merged.savingsLog = sanitiseLog(saved.savingsLog);
   merged.useActualsForForecast = Boolean(saved.useActualsForForecast);
@@ -170,6 +172,36 @@ export function moveItem(list, item, delta) {
   // what makes inserting at `to` land on the far side of the neighbour.
   list.splice(to, 0, list.splice(from, 1)[0]);
   return true;
+}
+
+/**
+ * One daily expense: a real calendar day, an amount, an optional category and
+ * an optional note. Entries with an unusable date are dropped rather than
+ * repaired — a guessed day would land real money in the wrong month, and the
+ * month it lands in is the whole point of the list.
+ *
+ * `categoryId` is kept as written even when no such category exists: the id may
+ * belong to one that was archived, and the month log already knows how to show
+ * an orphaned id. Null means uncategorised, which lands in "Other".
+ *
+ * Ids are minted when missing, since they key the row being edited or removed.
+ */
+export function sanitiseDailyExpenses(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  return list
+    .filter((e) => e && typeof e === "object" && isDateKey(e.date))
+    .map((e) => {
+      const id = typeof e.id === "string" && e.id && !seen.has(e.id) ? e.id : newId();
+      seen.add(id);
+      return {
+        id,
+        date: e.date,
+        categoryId: typeof e.categoryId === "string" && e.categoryId ? e.categoryId : null,
+        amount: Number.isFinite(e.amount) && e.amount >= 0 ? e.amount : 0,
+        note: String(e.note ?? ""),
+      };
+    });
 }
 
 /**
