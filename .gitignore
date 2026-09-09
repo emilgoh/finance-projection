@@ -1,3 +1,6 @@
 # local toolchain, created by setup.sh
 .venv/
 .tools/
+
+# wealth exports: income, balances, CPF. Never publish - this repo is public.
+archive/

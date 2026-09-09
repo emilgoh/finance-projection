@@ -47,8 +47,9 @@ It finishes by running the test suite. `rm -rf .venv .tools` undoes all of it.
 
 ## What it shows
 
-The app has two pages, switched from the tabs under the title and addressed by
-the URL hash — `#/projection` and `#/tracker`, so either can be bookmarked.
+The app has three pages, switched from the tabs under the title and addressed by
+the URL hash — `#/projection`, `#/tracker` and `#/daily`, so any of them can be
+bookmarked.
 
 ### Projection
 
@@ -85,7 +86,18 @@ the URL hash — `#/projection` and `#/tracker`, so either can be bookmarked.
   says so. Retirement spending is a separate, forward-looking assumption and is
   never affected.
 
-### On both pages
+### Daily log
+
+- **Log as you spend** — a day, an amount, a category and an optional note.
+  Entries are grouped by day with a total each, and the month's are summarised
+  underneath.
+- **It adds up into the tracker** — for any month and category with daily
+  entries, their sum *is* that cell in the monthly tracker, which shows it as
+  read-only with a link back here. Categories with no entries that month stay
+  hand-typed, so rent can be logged once a month and groceries as they happen.
+  Remove the entries and the typed figure comes back — it was never overwritten.
+
+### On all three pages
 
 - **Light & dark mode** — follows your system by default; the sun/moon button
   in the top-right corner switches theme, and the choice is remembered.
@@ -169,7 +181,7 @@ styles.css            theme (light/dark), layout, chart chrome
 js/projection.js      pure projection engine (no DOM)
 js/expenses.js        pure month/variance/average helpers, spending and savings (no DOM)
 js/state.js           state shape, persistence, sanitising (no DOM)
-js/router.js          hash routing between the two pages (no DOM)
+js/router.js          hash routing between the pages (no DOM)
 js/chart.js           interactive SVG chart renderer
 js/app.js             inputs, monthly logs, tiles, table — the DOM layer
 tests/                engine, monthly-log, state and router tests

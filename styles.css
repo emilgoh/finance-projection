@@ -140,7 +140,7 @@ button { font: inherit; color: inherit; }
 .plan-check { margin-top: 14px; }
 .plan-check small { color: var(--text-muted); font-size: 0.75rem; }
 input[type="number"], select, .account-row input, .account-row select,
-.one-off-row input {
+.one-off-row input, .daily-add input {
   background: var(--page);
   color: var(--text-primary);
   border: 1px solid var(--border);
@@ -335,6 +335,55 @@ input:focus-visible, select:focus-visible, button:focus-visible, .chart-region:f
   min-width: 0;
 }
 .log-summary { margin: 14px 0 0; font-size: 0.9rem; color: var(--text-secondary); }
+.log-derived { color: var(--text-primary); }
+.log-source {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.log-source:hover { color: var(--text-secondary); }
+
+/* ---------- daily log ---------- */
+.daily-add {
+  display: grid;
+  grid-template-columns: auto 1fr auto 2fr auto;
+  gap: 10px;
+  align-items: end;
+  padding-bottom: 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+/* One height across the row, so the labels above them line up. */
+.daily-add input, .daily-add select, .daily-add .btn { height: 38px; }
+
+.daily-list { display: flex; flex-direction: column; gap: 4px; max-width: 780px; }
+.day-group { padding: 10px 0 4px; }
+.day-group + .day-group { border-top: 1px solid var(--border); }
+.day-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; margin-bottom: 6px;
+  font-size: 0.8rem; color: var(--text-secondary);
+}
+.day-total { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.daily-row {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr 1.6fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 0;
+}
+.daily-row input, .daily-row select {
+  background: var(--page);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 0.95rem;
+  width: 100%;
+  min-width: 0;
+}
 .log-net { margin: 10px 0 0; font-size: 0.85rem; color: var(--text-muted); }
 .log-footer { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .forecast-hint { margin: 8px 0 0; font-size: 0.8rem; color: var(--text-muted); }
@@ -353,6 +402,13 @@ input:focus-visible, select:focus-visible, button:focus-visible, .chart-region:f
   .log-variance { grid-row: 2; grid-column: 2; text-align: right; }
   .log-row input { grid-row: 3; grid-column: 1 / -1; }
   .log-head { display: none; }
+  .daily-add { grid-template-columns: 1fr 1fr; }
+  .daily-note-field, .daily-add .btn { grid-column: 1 / -1; }
+  /* Category, amount and the remove button share a line; the note takes the
+     next one, so an entry still reads as one thing. */
+  .daily-row { grid-template-columns: 1.3fr 1fr auto; row-gap: 4px; padding: 8px 0; }
+  .daily-row input[type="text"] { grid-row: 2; grid-column: 1 / -1; }
+  .daily-row + .daily-row { border-top: 1px solid var(--border); }
   /* The subtotal's amount is a span, so it takes the slot the input would —
      and with the header row hidden, both its figures need naming. */
   .log-actual { grid-row: 3; grid-column: 1 / -1; }

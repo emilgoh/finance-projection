@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   STORAGE_KEY, LEGACY_STORAGE_KEY, DEFAULT_STATE, ACCOUNT_TYPES,
   loadState, writeState, clearState, mergeSaved,
-  sanitiseAccounts, sanitiseCategories, sanitiseSavingsBuckets, sanitiseLog, moveItem, newId,
+  sanitiseAccounts, sanitiseCategories, sanitiseSavingsBuckets, sanitiseDailyExpenses,
+  sanitiseLog, moveItem, newId,
   sanitiseTimestamp, backupHint, BACKUP_STALE_DAYS, sanitiseOneOffs,
 } from "../js/state.js";
 
@@ -508,4 +509,85 @@ test("a reordered list survives the storage round trip in its new order", () => 
   moveItem(state.spendCategories, state.spendCategories[2], -1);
   writeState(storage, state);
   assert.deepEqual(order(loadState(storage).spendCategories), ["Rent", "Transport", "Food"]);
+});
+
+/* ---------- daily expenses ---------- */
+
+test("sanitiseDailyExpenses: an unusable date drops the entry rather than guessing one", () => {
+  const out = sanitiseDailyExpenses([
+    { id: "a", date: "2026-06-03", amount: 10 },
+    { id: "b", date: "2026-02-31", amount: 10 },
+    { id: "c", date: "not-a-date", amount: 10 },
+    { id: "d", amount: 10 },
+    { id: "e", date: "2026-06-3", amount: 10 },
+  ]);
+  assert.deepEqual(out.map((e) => e.id), ["a"], "a guessed day files real money in the wrong month");
+});
+
+test("sanitiseDailyExpenses: fields are coerced the way the rest of the state is", () => {
+  const [entry] = sanitiseDailyExpenses([
+    { id: "a", date: "2026-06-03", categoryId: "c1", amount: -5, note: 12 },
+  ]);
+  assert.equal(entry.amount, 0, "a negative amount is clamped, not flipped");
+  assert.equal(entry.note, "12", "a note is always a string to render");
+  assert.equal(entry.categoryId, "c1");
+});
+
+test("sanitiseDailyExpenses: a missing category means uncategorised, not a broken id", () => {
+  const out = sanitiseDailyExpenses([
+    { id: "a", date: "2026-06-03", amount: 5 },
+    { id: "b", date: "2026-06-03", amount: 5, categoryId: "" },
+    { id: "c", date: "2026-06-03", amount: 5, categoryId: 7 },
+  ]);
+  for (const e of out) assert.equal(e.categoryId, null);
+});
+
+test("sanitiseDailyExpenses: an id belonging to an archived category is kept as written", () => {
+  const [entry] = sanitiseDailyExpenses([{ date: "2026-06-03", amount: 5, categoryId: "gone" }]);
+  assert.equal(entry.categoryId, "gone", "the month log already knows how to show an orphan");
+});
+
+test("sanitiseDailyExpenses: ids are minted when missing and never duplicated", () => {
+  const out = sanitiseDailyExpenses([
+    { date: "2026-06-03", amount: 5 },
+    { id: "dup", date: "2026-06-03", amount: 5 },
+    { id: "dup", date: "2026-06-04", amount: 5 },
+  ]);
+  assert.equal(new Set(out.map((e) => e.id)).size, 3);
+  for (const e of out) assert.equal(typeof e.id, "string");
+});
+
+test("sanitiseDailyExpenses: a non-array becomes an empty list", () => {
+  for (const bad of [undefined, null, "x", {}]) assert.deepEqual(sanitiseDailyExpenses(bad), []);
+});
+
+test("mergeSaved: daily expenses pass through the same funnel", () => {
+  const merged = mergeSaved({
+    dailyExpenses: [
+      { id: "a", date: "2026-06-03", categoryId: "c1", amount: 12.5, note: "lunch" },
+      { id: "b", date: "nope", amount: 99 },
+      "not an entry",
+    ],
+  });
+  assert.deepEqual(merged.dailyExpenses, [
+    { id: "a", date: "2026-06-03", categoryId: "c1", amount: 12.5, note: "lunch" },
+  ]);
+});
+
+test("mergeSaved: a hostile dailyExpenses still produces a loadable state", () => {
+  assert.deepEqual(mergeSaved({ dailyExpenses: { "2026-06-03": 40 } }).dailyExpenses, []);
+  assert.deepEqual(mergeSaved({}).dailyExpenses, []);
+});
+
+test("daily expenses survive the storage round trip beside the typed log", () => {
+  const storage = fakeStorage();
+  const state = loadState(storage);
+  state.spendLog = { "2026-06": { byCategory: { c1: 999 }, other: 20 } };
+  state.dailyExpenses = [
+    { id: "a", date: "2026-06-03", categoryId: "c1", amount: 12.5, note: "lunch" },
+  ];
+  writeState(storage, state);
+  const reloaded = loadState(storage);
+  assert.deepEqual(reloaded.dailyExpenses, state.dailyExpenses);
+  assert.deepEqual(reloaded.spendLog, state.spendLog, "the typed figure is not overwritten in storage");
 });

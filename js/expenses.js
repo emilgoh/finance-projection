@@ -16,6 +16,14 @@
  * or variable (groceries, going out). The split is presentational: it groups
  * the log and gives each group a subtotal, and changes no total and no average.
  *
+ * Daily expenses are a separate, flat list — one row per thing bought. They do
+ * not replace the month log; they feed it. For any month and category that has
+ * daily entries, their sum *is* that cell, and the typed figure is ignored;
+ * every other cell stays hand-typed. That is what lets rent be logged once a
+ * month and groceries logged as they happen. `effectiveSpendLog()` performs
+ * that merge, and everything downstream — variance, averages, the forecast —
+ * reads the merged log rather than either source.
+ *
  * The savings log reuses the month-entry shape exactly, with buckets standing
  * in for categories and a `target` standing in for a `budget`, so every helper
  * here works on both. The one thing that does not carry over is the reading of
@@ -30,6 +38,8 @@ export const KINDS = ["fixed", "variable"];
 export const KIND_LABELS = { fixed: "Fixed", variable: "Variable" };
 
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export const DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 /* ---------- month keys ---------- */
 
@@ -54,6 +64,35 @@ export function addMonths(key, delta) {
   const year = Math.floor(total / 12);
   const month = total - year * 12 + 1;
   return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+/**
+ * True for a real calendar day. The shape check alone would pass 2026-02-31,
+ * which would then sort into February and never be reachable from a calendar.
+ */
+export function isDateKey(key) {
+  if (typeof key !== "string" || !DATE_RE.test(key)) return false;
+  const [y, m, d] = key.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+}
+
+/** Local-time day key for a Date — "2026-08-05". Local, not UTC, on purpose. */
+export function dayKey(date) {
+  return `${monthKey(date)}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/** The month a day belongs to: "2026-08-05" -> "2026-08". */
+export function monthOfDay(key) {
+  return isDateKey(key) ? key.slice(0, 7) : null;
+}
+
+/** "2026-08-05" -> "Wed 5 Aug". */
+export function formatDay(key, locale = "en-US") {
+  if (!isDateKey(key)) return "";
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d)
+    .toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
 }
 
 /** "2026-08" -> "August 2026". */
@@ -94,6 +133,78 @@ export function categoryBudgetTotal(categories, kind) {
 /** Sum of the active savings buckets' monthly targets. */
 export function bucketTargetTotal(buckets) {
   return activeCategories(buckets).reduce((sum, b) => sum + num(b.target, 0), 0);
+}
+
+/* ---------- daily expenses ---------- */
+
+/**
+ * One month's entries, oldest day first, and within a day in the order they
+ * were added — the order they were spent in, as far as anything here knows.
+ */
+export function entriesForMonth(dailyExpenses, key) {
+  if (!Array.isArray(dailyExpenses) || !MONTH_RE.test(key ?? "")) return [];
+  return dailyExpenses
+    .filter((e) => e && monthOfDay(e.date) === key)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/** The same entries grouped by day, oldest day first, with each day's total. */
+export function entriesByDay(dailyExpenses, key) {
+  const days = new Map();
+  for (const entry of entriesForMonth(dailyExpenses, key)) {
+    if (!days.has(entry.date)) days.set(entry.date, { date: entry.date, entries: [], total: 0 });
+    const day = days.get(entry.date);
+    day.entries.push(entry);
+    day.total += num(entry.amount, 0);
+  }
+  return [...days.values()];
+}
+
+/**
+ * One month of daily entries folded into the month-entry shape, plus a count
+ * per id. The counts are what tell a caller which cells are entry-driven —
+ * a category summing to zero is still driven by its entries, so a zero total
+ * and no entries at all must stay distinguishable.
+ */
+export function dailyMonthTotals(dailyExpenses, key) {
+  const totals = { byCategory: {}, counts: new Map() };
+  for (const entry of entriesForMonth(dailyExpenses, key)) {
+    const id = entry.categoryId || OTHER_ID;
+    const amount = num(entry.amount, 0);
+    if (id === OTHER_ID) totals.other = num(totals.other, 0) + amount;
+    else totals.byCategory[id] = num(totals.byCategory[id], 0) + amount;
+    totals.counts.set(id, (totals.counts.get(id) ?? 0) + 1);
+  }
+  return totals;
+}
+
+/**
+ * The log the rest of the app should read: the typed month log with every
+ * entry-driven cell replaced by the sum of its daily entries.
+ *
+ * Replaced, never added to — a typed figure and a daily list are two answers to
+ * the same question, and summing them would quietly double-count the month you
+ * started logging daily. The typed figure is left in storage untouched, so it
+ * comes back if the entries are removed.
+ */
+export function effectiveSpendLog(spendLog, dailyExpenses) {
+  const months = new Set(Object.keys(spendLog || {}).filter((k) => MONTH_RE.test(k)));
+  for (const entry of Array.isArray(dailyExpenses) ? dailyExpenses : []) {
+    const month = monthOfDay(entry?.date);
+    if (month) months.add(month);
+  }
+
+  const merged = {};
+  for (const month of months) {
+    const typed = spendLog?.[month];
+    const daily = dailyMonthTotals(dailyExpenses, month);
+    const entry = { byCategory: { ...(typed?.byCategory || {}) } };
+    if (Number.isFinite(typed?.other)) entry.other = typed.other;
+    Object.assign(entry.byCategory, daily.byCategory);
+    if (Number.isFinite(daily.other)) entry.other = daily.other;
+    if (isLogged({ [month]: entry }, month)) merged[month] = entry;
+  }
+  return merged;
 }
 
 /* ---------- the log ---------- */

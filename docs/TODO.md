@@ -16,7 +16,9 @@ data, which is what moved it to the top.
 
 **2. Per-month notes.**
 "Why was June high?" is the obvious next question the log provokes and currently
-cannot answer. One optional free-text field per month entry covers it. Ranked
+cannot answer. One optional free-text field per month entry covers it. The daily
+log now answers this for any category logged day by day — each entry carries its
+own note — so what is left is the months and categories still typed in whole. Ranked
 above the other features because it is the one the tracker's own output leads
 you to ask. Additive to `spendLog` entries, so `sanitiseLog()` in `js/state.js`
 needs a matching case — and now has a test file to put it in.
@@ -133,6 +135,23 @@ These read like bugs and are not.
   reality check on the plan, the same way the variance table is — display only,
   by design. The spending log's actuals checkbox is the one exception, and it
   replaces a single input rather than adding a second source of truth.
+
+- **Daily entries replace a cell's typed figure, never add to it.** A typed
+  month figure and a list of days are two answers to the same question; summing
+  them would silently double-count the month someone starts logging daily. The
+  typed figure stays in storage untouched, so removing the entries brings it
+  back rather than leaving a zero. The merge is `effectiveSpendLog()`, and
+  everything downstream — variance, averages, the forecast — reads its result
+  rather than `state.spendLog` directly.
+
+- **The takeover is per category, not per month.** Rent gets logged once a
+  month, groceries get logged as they happen, and both are normal. A month-wide
+  switch would force the whole month into whichever style suits one category.
+
+- **A daily entry with an unusable date is dropped, not repaired.** Every other
+  sanitiser degrades a bad field to a safe default; a guessed day would file
+  real money in the wrong month, and which month it lands in is the entire point
+  of the list.
 
 - **Reordering moves a row one visible place, not one array index.** Archived
   categories still sit in the list and are not on screen, so a move steps over
